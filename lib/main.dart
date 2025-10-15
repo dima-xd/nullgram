@@ -13,6 +13,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+String? _currentAuthState;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -21,7 +23,12 @@ void main() async {
   TDLibClient.initTdlibUpdates();
 
   TDLibClient.authStateUpdates.listen((state) {
-    switch (state['@type']) {
+    final authType = state['@type'];
+
+    if (_currentAuthState == authType) return;
+    _currentAuthState = authType;
+
+    switch (authType) {
       case 'AuthorizationStateWaitPhoneNumber':
         WidgetsBinding.instance.addPostFrameCallback((_) {
           navigatorKey.currentState?.pushAndRemoveUntil(

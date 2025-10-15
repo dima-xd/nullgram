@@ -2,7 +2,7 @@ import 'chat.dart';
 
 class Messages {
   final int totalCount;
-  final List<Message> messages;
+  final List<Map<String, dynamic>> messages;
 
   Messages({
     required this.totalCount,
@@ -13,7 +13,7 @@ class Messages {
     return Messages(
       totalCount: json['totalCount'] ?? json['total_count'] ?? 0,
       messages: (json['messages'] as List<dynamic>? ?? [])
-          .map((e) => Message.fromJson(e as Map<String, dynamic>))
+          .map((e) => e as Map<String, dynamic>)
           .toList(),
     );
   }

@@ -44,7 +44,7 @@ class Chat {
   final bool viewAsTopics;
 
   final List<int> folderIds;
-  final Message? lastMessage;
+  final Map<String, dynamic>? lastMessage;
 
   Chat({
     required this.accentColorId,
@@ -124,15 +124,13 @@ class Chat {
       videoChat: VideoChat.fromJson(json['videoChat']),
       viewAsTopics: json['viewAsTopics'],
 
-      lastMessage: json['lastMessage'] != null
-          ? Message.fromJson(json['lastMessage'])
-          : null,
+      lastMessage: json['lastMessage'],
     );
   }
 
   Chat copyWith({
     List<int>? folderIds,
-    Message? lastMessage,
+    Map<String, dynamic>? lastMessage,
     int? unreadCount,
     List<ChatPosition>? positions,
   }) {

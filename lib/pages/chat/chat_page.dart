@@ -1,6 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:nullgram/pages/chat/widgets/message_audio.dart';
+import 'package:nullgram/pages/chat/widgets/message_photo.dart';
+import 'package:nullgram/pages/chat/widgets/message_text.dart';
+import 'package:nullgram/pages/chat/widgets/message_video.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import '../../tdlib/models/chat.dart';
@@ -24,7 +28,7 @@ class _ChatPageState extends State<ChatPage> {
   final ValueNotifier<bool> _isRecordingAudio = ValueNotifier(true);
   final ValueNotifier<String> _messageText = ValueNotifier('');
 
-  final ValueNotifier<List<Message>> _messages = ValueNotifier([]);
+  final ValueNotifier<List<Map<String, dynamic>>> _messages = ValueNotifier([]);
   final ValueNotifier<bool> _isLoading = ValueNotifier(false);
   final ValueNotifier<bool> _hasMore = ValueNotifier(true);
 
@@ -37,15 +41,13 @@ class _ChatPageState extends State<ChatPage> {
       _messageText.value = _messageController.text;
     });
 
-    _messages.value.add(widget.chat.lastMessage!);
-
     TDLibClient.messsagesUpdates.listen((update) async {
       final type = update['@type'];
       switch (type) {
         case updateNewMessageConst:
-          final message = Message.fromJson(update['message']);
-          if (message.chatId == widget.chat.id) {
-            _messages.value = [message, ..._messages.value];
+          final message = update['message'];
+          if (message['chatId'] == widget.chat.id) {
+            _messages.value = _groupMediaAlbums([message, ..._messages.value]);
             setState(() {});
           }
           break;
@@ -60,7 +62,7 @@ class _ChatPageState extends State<ChatPage> {
       while (true) {
         if (!mounted) return;
         _isLoading.value = true;
-        final fromId = _messages.value.last.id ?? 0;
+        final fromId = _messages.value.isEmpty ? 0 : _messages.value.last['id'];
 
         final localMessages = await TDLibClient.getChatHistory(
           chatId: widget.chat.id!,
@@ -70,8 +72,10 @@ class _ChatPageState extends State<ChatPage> {
           onlyLocal: true,
         );
 
+        if (!mounted) return;
+
         if (localMessages != null && localMessages.messages.isNotEmpty) {
-          _messages.value.addAll(localMessages.messages.toList());
+          _messages.value = _groupMediaAlbums([..._messages.value, ...localMessages.messages]);
           setState(() {});
         } else {
           break;
@@ -88,7 +92,7 @@ class _ChatPageState extends State<ChatPage> {
     if (_isLoading.value || !_hasMore.value) return;
     _isLoading.value = true;
 
-    final fromId = _messages.value.last.id ?? 0;
+    final fromId = _messages.value.isEmpty ? 0 : _messages.value.last['id'];
 
     final messages = await TDLibClient.getChatHistory(
       chatId: widget.chat.id!,
@@ -109,7 +113,7 @@ class _ChatPageState extends State<ChatPage> {
         ? (pos.pixels / (pos.maxScrollExtent / _messages.value.length)).round().clamp(0, _messages.value.length - 1)
         : 0;
 
-    _messages.value = [..._messages.value, ...messages.messages];
+    _messages.value = _groupMediaAlbums([..._messages.value, ...messages.messages]);
 
     await Future.delayed(Duration.zero);
 
@@ -193,59 +197,338 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  // TODO: Also show media, stickers, etc.
-  Widget _buildMessage(Message message) {
-    final isOutgoing = message.isOutgoing ?? false;
-    final text = message.content.text?.text ?? '';
+  Widget _buildMessage(Map<String, dynamic> message) {
+    final isOutgoing = message['isOutgoing'] ?? false;
+    final content = message['content'];
+    final contentType = content['@type'];
+    final hasCaption = content['caption']?['text'] != null &&
+        content['caption']['text'].toString().isNotEmpty;
+
+    final hasMedia = contentType == 'MessagePhoto' ||
+        contentType == 'MessageVideo' ||
+        contentType == 'MessageAudio';
+
+    if (hasMedia && !hasCaption) {
+      return Align(
+        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
+          ),
+          child: Column(
+            crossAxisAlignment: isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _buildMediaContent(content, message['id']),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _buildTimeRow(message, isOutgoing),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.75,
         ),
-        decoration: BoxDecoration(
-          color: isOutgoing
-              ? Theme.of(context).colorScheme.primaryContainer
-              : Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(16),
-        ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              text,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-                fontSize: 15,
+            if (hasMedia)
+              ClipRRect(
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
+                child: _buildMediaContent(content, message['id']),
               ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatTime(message.date!),
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                    fontSize: 12,
+            if (hasMedia)
+              Container(
+                constraints: const BoxConstraints(minWidth: double.infinity),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isOutgoing
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
                   ),
                 ),
-                if (isOutgoing) ...[
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.done_all,
-                    size: 16,
-                    color: Theme.of(context).colorScheme.primary,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    MessageText(content: content['caption']),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _buildTimeRow(message, isOutgoing),
+                    ),
+                  ],
+                ),
+              )
+            else
+              IntrinsicWidth(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isOutgoing
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                ],
-              ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (contentType == 'MessageText')
+                        MessageText(content: content['text']),
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _buildTimeRow(message, isOutgoing),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> _groupMediaAlbums(List<Map<String, dynamic>> messages) {
+    final result = <Map<String, dynamic>>[];
+    final albumMap = <int, List<Map<String, dynamic>>>{};
+    final albumIndices = <int, int>{};
+
+    for (int i = 0; i < messages.length; i++) {
+      final message = messages[i];
+      final mediaAlbumId = message['mediaAlbumId'] as int?;
+
+      if (mediaAlbumId != null && mediaAlbumId != 0) {
+        albumMap.putIfAbsent(mediaAlbumId, () => []).add(message);
+        if (!albumIndices.containsKey(mediaAlbumId)) {
+          albumIndices[mediaAlbumId] = i;
+        }
+      }
+    }
+
+    for (final albumMessages in albumMap.values) {
+      albumMessages.sort((a, b) => (a['id'] as int).compareTo(b['id'] as int));
+    }
+
+    for (int i = 0; i < messages.length; i++) {
+      final message = messages[i];
+      final mediaAlbumId = message['mediaAlbumId'] as int?;
+
+      if (mediaAlbumId != null && mediaAlbumId != 0) {
+        if (albumIndices[mediaAlbumId] == i) {
+          final albumMessages = albumMap[mediaAlbumId]!;
+          if (albumMessages.length > 1) {
+            result.add({
+              'isAlbum': true,
+              'messages': albumMessages,
+              'isOutgoing': albumMessages.first['isOutgoing'],
+              'date': albumMessages.first['date'],
+              'id': albumMessages.first['id'],
+              'mediaAlbumId': mediaAlbumId,
+            });
+          } else {
+            result.add(albumMessages.first);
+          }
+        }
+      } else {
+        result.add(message);
+      }
+    }
+
+    return result;
+  }
+
+  Widget _buildAlbum(List<Map<String, dynamic>> albumMessages) {
+    final isOutgoing = albumMessages.first['isOutgoing'] ?? false;
+    final messageCount = albumMessages.length;
+
+    final firstContent = albumMessages.first['content'];
+    final hasCaption = firstContent['caption']?['text'] != null &&
+        firstContent['caption']['text'].toString().isNotEmpty;
+
+    int crossAxisCount;
+    if (messageCount == 1) {
+      crossAxisCount = 1;
+    } else if (messageCount == 2 || messageCount == 4) {
+      crossAxisCount = 2;
+    } else if (messageCount == 3) {
+      crossAxisCount = 3;
+    } else {
+      crossAxisCount = 2;
+    }
+
+    if (hasCaption) {
+      return Align(
+        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Column(
+            crossAxisAlignment: isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.75,
+                ),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                  ),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: crossAxisCount,
+                      crossAxisSpacing: 2,
+                      mainAxisSpacing: 2,
+                      childAspectRatio: 1.0,
+                    ),
+                    itemCount: messageCount,
+                    itemBuilder: (context, index) {
+                      final message = albumMessages[index];
+                      final content = message['content'];
+                      return _buildMediaContent(content, message['id']);
+                    },
+                  ),
+                ),
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.75,
+                ),
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: double.infinity),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isOutgoing
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(16),
+                      bottomRight: Radius.circular(16),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      MessageText(content: firstContent['caption']),
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _buildTimeRow(albumMessages.first, isOutgoing),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Align(
+      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        child: Column(
+          crossAxisAlignment: isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 2,
+                  mainAxisSpacing: 2,
+                  childAspectRatio: 1.0,
+                ),
+                itemCount: messageCount,
+                itemBuilder: (context, index) {
+                  final message = albumMessages[index];
+                  final content = message['content'];
+                  return _buildMediaContent(content, message['id']);
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _buildTimeRow(albumMessages.first, isOutgoing),
+              ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildMediaContent(Map<String, dynamic> content, int messageId) {
+    final contentType = content['@type'];
+
+    switch (contentType) {
+      case 'MessagePhoto':
+        return MessagePhoto(content: content, messageId: messageId);
+      case 'MessageVideo':
+        return MessageVideo(content: content);
+      case 'MessageAudio':
+        return MessageAudio(content: content);
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _buildTimeRow(Map<String, dynamic> message, bool isOutgoing) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          _formatTime(message['date']!),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            fontSize: 12,
+          ),
+        ),
+        if (isOutgoing) ...[
+          const SizedBox(width: 4),
+          Icon(
+            Icons.done_all,
+            size: 16,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ],
+      ],
     );
   }
 
@@ -269,9 +552,7 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           IconButton(
             icon: const Icon(Icons.emoji_emotions_outlined),
-            onPressed: () {
-              // TODO: Open emoji/sticker picker
-            },
+            onPressed: () {},
           ),
           Expanded(
             child: Container(
@@ -298,9 +579,7 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   const SizedBox(width: 8),
                   InkWell(
-                    onTap: () {
-                      // TODO: Open attachment menu
-                    },
+                    onTap: () {},
                     borderRadius: BorderRadius.circular(16),
                     child: const Padding(
                       padding: EdgeInsets.all(4),
@@ -379,9 +658,7 @@ class _ChatPageState extends State<ChatPage> {
       appBar: AppBar(
         titleSpacing: 0,
         title: InkWell(
-          onTap: () {
-            // TODO: Open chat info
-          },
+          onTap: () {},
           child: Row(
             children: [
               _buildAvatar(radius: 20),
@@ -396,7 +673,6 @@ class _ChatPageState extends State<ChatPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    // TODO: Replace with actual last seen info
                     Text(
                       'last seen recently',
                       style: TextStyle(
@@ -424,7 +700,7 @@ class _ChatPageState extends State<ChatPage> {
       body: Column(
         children: [
           Expanded(
-            child: ValueListenableBuilder<List<Message>>(
+            child: ValueListenableBuilder(
               valueListenable: _messages,
               builder: (context, messages, child) {
                 return ValueListenableBuilder<bool>(
@@ -443,7 +719,6 @@ class _ChatPageState extends State<ChatPage> {
                           return const Padding(
                             padding: EdgeInsets.all(16),
                             child: Center(
-                              // TODO: Replace with a better loading indicator
                               child: Text(
                                 'Loading older messages',
                                 style: TextStyle(color: Colors.grey),
@@ -466,6 +741,10 @@ class _ChatPageState extends State<ChatPage> {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             _loadBatch();
                           });
+                        }
+
+                        if (message['isAlbum'] == true) {
+                          return _buildAlbum(message['messages']);
                         }
 
                         return _buildMessage(message);

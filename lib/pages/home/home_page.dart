@@ -150,10 +150,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             }
           }
 
-        case updateSupergroupFullInfoConst:
-          return;
-
-        case "UpdateSupergroup":
+        case updateSupergroupConst:
           var isMember = true;
           var type = update["supergroup"]["status"]["@type"];
           if (type == "ChatMemberStatusLeft" ||
@@ -162,6 +159,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           }
           memberStatus[update["supergroup"]["id"]] = isMember;
 
+        case updateChatReadInboxConst:
+          final chatId = update["chatId"] as int;
+          final unreadCount = update["unreadCount"] as int;
+          final existingChat = chatsNotifier.value[chatId];
+
+          if (existingChat != null) {
+            final updatedChats = Map<int, Map<String, dynamic>>.from(chatsNotifier.value);
+            updatedChats[chatId] = {...existingChat, 'unreadCount': unreadCount};
+            chatsNotifier.value = updatedChats;
+          }
+      }
+    });
+
+    TDLibClient.filesUpdates.listen((update) async {
+      final type = update['@type'];
+      switch (type) {
         case updateFileConst:
           final fileId = update['file']?['id'] as int?;
           final path = update['file']?['local']?['path'] as String?;
@@ -173,17 +186,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               final updatedChats = Map<int, Map<String, dynamic>>.from(chatsNotifier.value);
               chatsNotifier.value = updatedChats;
             }
-          }
-
-        case updateChatReadInboxConst:
-          final chatId = update["chatId"] as int;
-          final unreadCount = update["unreadCount"] as int;
-          final existingChat = chatsNotifier.value[chatId];
-
-          if (existingChat != null) {
-            final updatedChats = Map<int, Map<String, dynamic>>.from(chatsNotifier.value);
-            updatedChats[chatId] = {...existingChat, 'unreadCount': unreadCount};
-            chatsNotifier.value = updatedChats;
           }
       }
     });

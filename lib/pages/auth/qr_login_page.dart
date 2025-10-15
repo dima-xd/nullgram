@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -12,19 +14,29 @@ class QrLoginPage extends StatefulWidget {
 class _QrLoginPageState extends State<QrLoginPage> {
   final qrLink = ValueNotifier<String?>(null);
 
+  StreamSubscription? _authSubscription;
+
   @override
   void initState() {
     _requestQrCode();
 
     super.initState();
 
-    TDLibClient.authStateUpdates.listen((state) {
+    _authSubscription = TDLibClient.authStateUpdates.listen((state) {
       if (state['@type'] == 'AuthorizationStateWaitOtherDeviceConfirmation') {
-        setState(() {
-          qrLink.value = state['link'];
-        });
+        if (mounted) {
+          setState(() {
+            qrLink.value = state['link'];
+          });
+        }
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 
   void _requestQrCode() async {

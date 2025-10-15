@@ -96,6 +96,12 @@ class _ChatListViewState extends State<ChatListView> {
 
       if (aIsPinned != bIsPinned) return bIsPinned ? 1 : -1;
 
+      if (aIsPinned && bIsPinned) {
+        final aOrder = int.tryParse(aPosition?['order']?.toString() ?? '0') ?? 0;
+        final bOrder = int.tryParse(bPosition?['order']?.toString() ?? '0') ?? 0;
+        return bOrder.compareTo(aOrder);
+      }
+
       final aDate = a['lastMessage']?['date'] as int? ?? 0;
       final bDate = b['lastMessage']?['date'] as int? ?? 0;
       return bDate.compareTo(aDate);
