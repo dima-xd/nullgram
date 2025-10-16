@@ -5,6 +5,9 @@ on:
     branches:
       - master
 
+permissions:
+  actions: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -35,7 +38,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable'
+          flutter-version-file: pubspec.yaml
 
       - name: Install dependencies
         run: flutter pub get
@@ -64,4 +67,4 @@ jobs:
             🕒 Date: ${{ github.event.head_commit.timestamp }}
           files: release-apks/*.apk
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
