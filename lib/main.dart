@@ -8,6 +8,7 @@ import 'package:nullgram/pages/auth/phone_input_page.dart';
 import 'package:nullgram/pages/auth/qr_login_page.dart';
 import 'package:nullgram/pages/home/home_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/tdlib/tdlib_helper.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -103,16 +104,31 @@ void main() async {
   runApp(MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      home: FutureBuilder<bool>(
+        future: TDLibHelper.isAuthorized(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return snapshot.data! ? HomePage() : Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        },
       ),
     );
   }

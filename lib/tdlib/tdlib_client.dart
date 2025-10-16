@@ -201,8 +201,7 @@ class TDLibClient {
       switch (type) {
         case updateAuthorizationStateConst:
           _authUpdatesController.add(update['authorizationState']);
-          break;
-        case updateChatFoldersConst || updateNewChatConst || updateChatPositionConst || updateChatLastMessageConst || updateChatAddedToListConst || updateSupergroupFullInfoConst || updateSupergroupConst || updateChatReadInboxConst:
+        case updateChatFoldersConst || updateNewChatConst || updateChatPositionConst || updateChatLastMessageConst || updateChatAddedToListConst || updateSupergroupFullInfoConst || updateSupergroupConst || updateChatReadInboxConst || updateUserConst:
           _chatUpdatesController.add(update);
         case updateNewMessageConst:
           _messagesController.add(update);

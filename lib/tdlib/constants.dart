@@ -10,3 +10,4 @@ const String updateChatReadInboxConst = 'UpdateChatReadInbox';
 const String updateSupergroupFullInfoConst = 'UpdateSupergroupFullInfo';
 const String updateFileConst = 'UpdateFile';
 const String updateNewMessageConst = 'UpdateNewMessage';
+const String updateUserConst = 'UpdateUser';

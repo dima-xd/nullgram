@@ -10,11 +10,15 @@ import 'image_details.dart';
 class MessagePhoto extends StatefulWidget {
   final Map<String, dynamic> content;
   final int messageId;
+  final List<String>? albumPaths;
+  final int? albumIndex;
 
   const MessagePhoto({
     super.key,
     required this.content,
     required this.messageId,
+    this.albumPaths,
+    this.albumIndex,
   });
 
   @override
@@ -146,9 +150,9 @@ class _MessagePhotoState extends State<MessagePhoto> {
             context,
             MaterialPageRoute(
               builder: (context) => ImageDetails(
-                photoPath: photoPath,
-                miniThumbnail: miniThumbnail,
-                heroTag: heroTag,
+                photoPaths: widget.albumPaths ?? [photoPath],
+                initialIndex: widget.albumIndex ?? 0,
+                heroTag: 'photo_$widget.messageId',
               ),
             ),
           );

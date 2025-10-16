@@ -28,6 +28,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final Map<int, int> linkedChats = {};
   final Map<int, bool> memberStatus = {};
 
+  final Map<int, dynamic> users = {};
+  final Map<int, dynamic> supergroups = {};
+
   final Map<String, bool> _fileExistsCache = {};
   final Map<String, Uint8List?> _miniThumbnailCache = {};
 
@@ -42,6 +45,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         case updateNewChatConst:
           final chatData = update['chat'] as Map<String, dynamic>;
           final chatId = chatData['id'] as int;
+
+          final user = users[chatId];
+          if (user != null) {
+            chatData["user"] = user;
+          }
+
+          final supergroup = supergroups[chatId];
+          if (supergroup != null) {
+            chatData["supergroup"] = supergroup;
+          }
 
           var status = memberStatus[chatData['type']?["supergroupId"]] ?? true;
           if (!status) return;
@@ -157,6 +170,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               type == "ChatMemberStatusBanned") {
             isMember = false;
           }
+
+          final id = "-100${update["supergroup"]["id"]}";
+          supergroups[int.parse(id)] = update["supergroup"];
           memberStatus[update["supergroup"]["id"]] = isMember;
 
         case updateChatReadInboxConst:
@@ -169,6 +185,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             updatedChats[chatId] = {...existingChat, 'unreadCount': unreadCount};
             chatsNotifier.value = updatedChats;
           }
+        case updateUserConst:
+          users[update["user"]["id"]] = update["user"];
       }
     });
 
@@ -277,7 +295,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => ChatPage(chat: Chat.fromJson(chatData)),
+          builder: (context) => ChatPage(chat: chatData),
         ),
       );
     }
