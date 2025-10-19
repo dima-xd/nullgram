@@ -44,6 +44,26 @@ class TDLibClient {
     });
   }
 
+  static Future<void> sendAudio({required int chatId, required String path}) async {
+    final jsonMap = {
+      "@type": "sendMessage",
+      "chatId": chatId,
+      "inputMessageContent": {
+        "@type": "inputMessageAudio",
+        "audio": {
+          "@type": "inputFileLocal",
+          "path": path,
+        },
+        "duration": 0,
+        "title": "",
+        "performer": "",
+      },
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
 
   static Future<void> downloadFile({required int fileId}) async {
     final jsonMap = {

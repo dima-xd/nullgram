@@ -17,13 +17,12 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final ValueNotifier<bool> isLoading = ValueNotifier(true);
-  final ValueNotifier<Map<int, Map<String, dynamic>>> chatsNotifier = ValueNotifier({});
+  final ValueNotifier<Map<int, Map<String, dynamic>>> chats = ValueNotifier({});
   final ValueNotifier<List<Map<String, dynamic>>> folders = ValueNotifier([]);
   int selectedFolderIndex = 0;
 
   TabController? _tabController;
 
-  final Map<int, int> linkedChats = {};
   final Map<int, bool> memberStatus = {};
 
   final Map<int, dynamic> users = {};
@@ -64,11 +63,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             TDLibClient.downloadFile(fileId: photo['small']['id']).catchError((_) {});
           }
 
-          final updatedChats = Map<int, Map<String, dynamic>>.from(chatsNotifier.value);
+          final updatedChats = Map<int, Map<String, dynamic>>.from(chats.value);
           updatedChats[chatId] = chatData;
-          chatsNotifier.value = updatedChats;
-          
+
           _updateFolderUnreadCounts();
+
+          chats.value = updatedChats;
+          setState(() {});
 
         case updateChatFoldersConst:
           final chatFolders = update['chatFolders'] ?? [];
@@ -100,7 +101,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         case updateChatPositionConst:
           final chatId = update['chatId'];
           final position = update['position'];
-          final existingChat = chatsNotifier.value[chatId];
+          final existingChat = chats.value[chatId];
 
           if (existingChat != null) {
             final positions = existingChat['positions'] ?? [];
@@ -114,16 +115,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               positions.add(position);
             }
 
-            final updatedChats = chatsNotifier.value;
+            final updatedChats = chats.value;
             updatedChats[chatId] = {...existingChat, 'positions': positions};
-            chatsNotifier.value = updatedChats;
+            chats.value = updatedChats;
           }
 
         case updateChatLastMessageConst:
           final chatId = update['chatId'];
           final lastMessage = update['lastMessage'];
           final newPositions = update['positions'];
-          final existingChat = chatsNotifier.value[chatId];
+          final existingChat = chats.value[chatId];
 
           if (existingChat != null) {
             final mergedPositions = List<Map<String, dynamic>>.from(
@@ -141,28 +142,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               }
             }
 
-            final updatedChats = chatsNotifier.value;
+            final updatedChats = chats.value;
             updatedChats[chatId] = {
               ...existingChat,
               'lastMessage': lastMessage,
               'positions': mergedPositions,
             };
-            chatsNotifier.value = updatedChats;
+            chats.value = updatedChats;
           }
 
         case updateChatAddedToListConst:
           final chatId = update['chatId'];
           final folderId = update['chatList']?['chatFolderId'];
-          final existingChat = chatsNotifier.value[chatId];
+          final existingChat = chats.value[chatId];
 
           if (existingChat != null && folderId != null) {
             final folderIds = existingChat['folderIds'] ?? [];
 
             if (!folderIds.contains(folderId)) {
               folderIds.add(folderId);
-              final updatedChats = chatsNotifier.value;
+              final updatedChats = chats.value;
               updatedChats[chatId] = {...existingChat, 'folderIds': folderIds};
-              chatsNotifier.value = updatedChats;
+              chats.value = updatedChats;
             }
           }
 
@@ -178,18 +179,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           supergroups[int.parse(id)] = update["supergroup"];
           memberStatus[update["supergroup"]["id"]] = isMember;
 
-        case updateChatReadInboxConst:
-          final chatId = update["chatId"];
-          final unreadCount = update["unreadCount"];
-          final existingChat = chatsNotifier.value[chatId];
-
-          if (existingChat != null) {
-            final updatedChats = chatsNotifier.value;
-            updatedChats[chatId] = {...existingChat, 'unreadCount': unreadCount};
-            chatsNotifier.value = updatedChats;
-            
-            _updateFolderUnreadCounts();
-          }
         case updateUserConst:
           users[update["user"]["id"]] = update["user"];
         case updateUserStatusConst:
@@ -198,7 +187,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           if (user != null) {
             user['status'] = update['status'];
             
-            final updatedChats = chatsNotifier.value;
+            final updatedChats = chats.value;
             for (final chatId in updatedChats.keys) {
               final chat = updatedChats[chatId];
               if (chat?['user']?['id'] == userId) {
@@ -211,7 +200,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 };
               }
             }
-            chatsNotifier.value = updatedChats;
+            chats.value = updatedChats;
           }
       }
     });
@@ -227,8 +216,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             final exists = await File(path).exists();
             if (_fileExistsCache[path] != exists) {
               _fileExistsCache[path] = exists;
-              final updatedChats = chatsNotifier.value;
-              chatsNotifier.value = updatedChats;
+              final updatedChats = chats.value;
+              chats.value = updatedChats;
             }
           }
       }
@@ -258,7 +247,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final folderId = folder['id'];
       int unreadChatsCount = 0;
       
-      for (final chat in chatsNotifier.value.values) {
+      for (final chat in chats.value.values) {
         final chatUnreadCount = chat['unreadCount'] ?? 0;
         if (chatUnreadCount > 0) {
           if (folderId == -1) {
@@ -355,7 +344,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       drawer: const HomeMenu(),
       body: folders.value.isEmpty || _tabController == null
           ? ChatListView(
-        chatsNotifier: chatsNotifier,
+        chatsNotifier: chats,
         folderId: null,
         fileExistsCache: _fileExistsCache,
         miniThumbnailCache: _miniThumbnailCache,
@@ -365,7 +354,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         controller: _tabController,
         children: folders.value.map((folder) {
           return ChatListView(
-            chatsNotifier: chatsNotifier,
+            chatsNotifier: chats,
             folderId: folder['id'] == -1 ? null : folder['id'],
             fileExistsCache: _fileExistsCache,
             miniThumbnailCache: _miniThumbnailCache,
@@ -377,7 +366,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _openChat(int chatID) {
-    final chatData = chatsNotifier.value[chatID];
+    final chatData = chats.value[chatID];
     if (chatData != null) {
       Navigator.push(
         context,

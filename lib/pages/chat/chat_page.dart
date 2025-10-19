@@ -8,6 +8,8 @@ import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 class ChatPage extends StatefulWidget {
   final Map<String, dynamic> chat;
@@ -25,12 +27,14 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
-  final ValueNotifier<bool> _isRecordingAudio = ValueNotifier(true);
+  final ValueNotifier<bool> _isAudioMode = ValueNotifier(true);
+  final ValueNotifier<bool> _isRecording = ValueNotifier<bool>(false);
   final ValueNotifier<String> _messageText = ValueNotifier('');
 
   final ValueNotifier<List<Map<String, dynamic>>> _messages = ValueNotifier([]);
   final ValueNotifier<bool> _isLoading = ValueNotifier(false);
   final ValueNotifier<bool> _hasMore = ValueNotifier(true);
+  final _record = AudioRecorder();
 
   static const int _batchSize = 50;
 
@@ -146,13 +150,42 @@ class _ChatPageState extends State<ChatPage> {
     _messageController.dispose();
     _messageFocusNode.dispose();
     _scrollController.dispose();
-    _isRecordingAudio.dispose();
+    _isAudioMode.dispose();
     _messageText.dispose();
     _messages.dispose();
     _isLoading.dispose();
     _hasMore.dispose();
+    _record.dispose();
     super.dispose();
   }
+
+  Future<void> startAudioRecording() async {
+    if (await _record.hasPermission()) {
+      _isRecording.value = true;
+
+      final dir = await getTemporaryDirectory();
+
+      await _record.start(
+        const RecordConfig(
+          encoder: AudioEncoder.opus,
+          bitRate: 96000,
+        ),
+        path: '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.ogg',
+      );
+    }
+  }
+  Future<void> stopAudioRecording() async {
+    final chatId = widget.chat['id'];
+    final path = await _record.stop();
+
+    _isRecording.value = false;
+
+    await TDLibClient.sendAudio(chatId: chatId, path: path!);
+  }
+
+  // TODO: Implement video recording methods
+  Future<void> startVideoRecording() async {}
+  Future<void> stopVideoRecording() async {}
 
   Widget _buildMessageInput() {
     final canSendBasicMessages = widget.chat['permissions']?['canSendBasicMessages'] ?? true;
@@ -214,62 +247,52 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
           const SizedBox(width: 4),
-          ValueListenableBuilder<String>(
-            valueListenable: _messageText,
-            builder: (context, text, child) {
-              if (text.trim().isEmpty) {
-                return ValueListenableBuilder<bool>(
-                  valueListenable: _isRecordingAudio,
-                  builder: (context, isRecording, child) {
-                    return InkWell(
-                      onTap: () {
-                        _isRecordingAudio.value = !isRecording;
-                      },
-                      borderRadius: BorderRadius.circular(24),
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
-                          shape: BoxShape.circle,
-                        ),
+          ValueListenableBuilder<bool>(
+            valueListenable: _isAudioMode,
+            builder: (context, isAudioMode, child) {
+              return ValueListenableBuilder<bool>(
+                valueListenable: _isRecording,
+                builder: (context, isRecording, child) {
+                  return GestureDetector(
+                    onTap: () {
+                      if (_isAudioMode.value && _isRecording.value) {
+                        stopAudioRecording();
+                        return;
+                      } else if (!_isAudioMode.value && _isRecording.value) {
+                        stopVideoRecording();
+                        return;
+                      }
+
+                      _isAudioMode.value = !isAudioMode;
+                    },
+                    onLongPressStart: (_) async {
+                      if (isAudioMode) {
+                        await startAudioRecording();
+                      } else {
+                        await startVideoRecording();
+                      }
+                    },
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: isRecording ? Colors.red : Theme.of(context).colorScheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
                         child: Icon(
-                          isRecording ? Icons.mic : Icons.videocam,
+                          isAudioMode
+                              ? (isRecording ? Icons.mic : Icons.mic_none)
+                              : Icons.videocam,
                           color: Colors.white,
                         ),
                       ),
-                    );
-                  },
-                );
-              }
-
-              return InkWell(
-                onTap: () async {
-                  final messageText = text.trim();
-                  if (messageText.isNotEmpty) {
-                    await TDLibClient.sendMessage(
-                      chatId: widget.chat['id']!,
-                      text: messageText,
-                    );
-                    _messageController.clear();
-                  }
+                    ),
+                  );
                 },
-                borderRadius: BorderRadius.circular(24),
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.send,
-                    color: Colors.white,
-                  ),
-                ),
               );
             },
-          ),
+          )
         ],
       ),
     );
@@ -306,7 +329,7 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                     if (widget.chat['user'] != null)
                       Text(
-                        MessageFormatter.getUserStatus(widget.chat['user']),
+                        MessageFormatter.getUserStatus(widget.chat['user']!),
                         style: TextStyle(
                           fontSize: 13,
                           color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),

@@ -10,9 +10,7 @@ class MessageFormatter {
     return '${(count / 1000000).toStringAsFixed(1)}M';
   }
 
-  static String getUserStatus(Map<String, dynamic>? user) {
-    if (user == null) return '';
-
+  static String getUserStatus(Map<dynamic, dynamic> user) {
     final status = user['status'];
     if (status == null) return 'last seen recently';
 

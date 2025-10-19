@@ -21,6 +21,7 @@ dependencies:
   flutter_dotenv: ^6.0.0
   share_plus: ^12.0.0
   intl: ^0.20.2
+  record: ^6.1.2
 
 dev_dependencies:
   flutter_test:
