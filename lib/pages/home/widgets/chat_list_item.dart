@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'chat_avatar.dart';
+import '../../chat/widgets/chat_avatar.dart';
 
 class ChatListItem extends StatelessWidget {
   final Map<String, dynamic> chat;

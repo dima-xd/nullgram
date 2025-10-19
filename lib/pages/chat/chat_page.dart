@@ -51,6 +51,19 @@ class _ChatPageState extends State<ChatPage> {
             _messages.value = AlbumsGrouper.groupMediaAlbums([message, ..._messages.value]);
             setState(() {});
           }
+        case updateDeleteMessagesConst:
+          final chatId = update['chatId'];
+          final messageIds = update['messageIds'];
+          
+          if (chatId == widget.chat['id']) {
+            if (!mounted) return;
+            
+            _messages.value = _messages.value.where((message) {
+              return !messageIds.contains(message['id']);
+            }).toList();
+            
+            setState(() {});
+          }
           break;
       }
     });
@@ -142,6 +155,12 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildMessageInput() {
+    final canSendBasicMessages = widget.chat['permissions']?['canSendBasicMessages'] ?? true;
+
+    if (!canSendBasicMessages) {
+      return const SizedBox.shrink();
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
@@ -258,7 +277,15 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        const double minSwipeVelocity = 300.0;
+        if (details.primaryVelocity != null && 
+            details.primaryVelocity! > minSwipeVelocity) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
         title: InkWell(
@@ -377,6 +404,6 @@ class _ChatPageState extends State<ChatPage> {
           _buildMessageInput(),
         ],
       ),
-    );
+    ));
   }
 }

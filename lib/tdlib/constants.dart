@@ -11,3 +11,6 @@ const String updateSupergroupFullInfoConst = 'UpdateSupergroupFullInfo';
 const String updateFileConst = 'UpdateFile';
 const String updateNewMessageConst = 'UpdateNewMessage';
 const String updateUserConst = 'UpdateUser';
+const String updateUserStatusConst = 'UpdateUserStatus';
+const String updateDeleteMessagesConst = 'UpdateDeleteMessages';
+const String updateUnreadMessageCountConst = 'UpdateUnreadMessageCount';

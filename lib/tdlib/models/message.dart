@@ -1,5 +1,3 @@
-import 'chat.dart';
-
 class Messages {
   final int totalCount;
   final List<Map<String, dynamic>> messages;

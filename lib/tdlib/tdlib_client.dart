@@ -194,16 +194,19 @@ class TDLibClient {
       final update = jsonDecode(event);
       final type = update['@type'];
 
-      if (type == "UpdateOption") {
+      if (type == "UpdateOption" || type == updateUnreadMessageCountConst) {
         return;
       }
 
       switch (type) {
         case updateAuthorizationStateConst:
           _authUpdatesController.add(update['authorizationState']);
-        case updateChatFoldersConst || updateNewChatConst || updateChatPositionConst || updateChatLastMessageConst || updateChatAddedToListConst || updateSupergroupFullInfoConst || updateSupergroupConst || updateChatReadInboxConst || updateUserConst:
+        case updateChatFoldersConst || updateNewChatConst || updateChatPositionConst ||
+          updateChatLastMessageConst || updateChatAddedToListConst || updateSupergroupFullInfoConst ||
+          updateSupergroupConst || updateChatReadInboxConst || updateUserConst ||
+          updateUserStatusConst:
           _chatUpdatesController.add(update);
-        case updateNewMessageConst:
+        case updateNewMessageConst || updateDeleteMessagesConst:
           _messagesController.add(update);
         case updateFileConst:
           _filesController.add(update);
