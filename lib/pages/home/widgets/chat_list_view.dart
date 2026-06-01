@@ -50,6 +50,9 @@ class _ChatListViewState extends State<ChatListView> {
     return ListView.separated(
       key: PageStorageKey('chat_list_${widget.folderId}'),
       itemCount: chats.length,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewPadding.bottom,
+      ),
       addAutomaticKeepAlives: true,
       cacheExtent: 1000,
       separatorBuilder: (_, __) => const Divider(

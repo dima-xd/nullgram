@@ -38,6 +38,8 @@ class _ChatPageState extends State<ChatPage> {
 
   static const int _batchSize = 50;
 
+  StreamSubscription<Map<String, dynamic>>? _messagesSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -45,7 +47,7 @@ class _ChatPageState extends State<ChatPage> {
       _messageText.value = _messageController.text;
     });
 
-    TDLibClient.messsagesUpdates.listen((update) async {
+    _messagesSubscription = TDLibClient.messsagesUpdates.listen((update) async {
       final type = update['@type'];
       switch (type) {
         case updateNewMessageConst:
@@ -147,6 +149,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _messagesSubscription?.cancel();
     _messageController.dispose();
     _messageFocusNode.dispose();
     _scrollController.dispose();
@@ -187,6 +190,14 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> startVideoRecording() async {}
   Future<void> stopVideoRecording() async {}
 
+  Future<void> _sendMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
+    _messageController.clear();
+    await TDLibClient.sendMessage(chatId: widget.chat['id'], text: text);
+  }
+
   Widget _buildMessageInput() {
     final canSendBasicMessages = widget.chat['permissions']?['canSendBasicMessages'] ?? true;
 
@@ -194,7 +205,9 @@ class _ChatPageState extends State<ChatPage> {
       return const SizedBox.shrink();
     }
 
-    return Container(
+    return SafeArea(
+      top: false,
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
@@ -247,47 +260,71 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
           const SizedBox(width: 4),
-          ValueListenableBuilder<bool>(
-            valueListenable: _isAudioMode,
-            builder: (context, isAudioMode, child) {
-              return ValueListenableBuilder<bool>(
-                valueListenable: _isRecording,
-                builder: (context, isRecording, child) {
-                  return GestureDetector(
-                    onTap: () {
-                      if (_isAudioMode.value && _isRecording.value) {
-                        stopAudioRecording();
-                        return;
-                      } else if (!_isAudioMode.value && _isRecording.value) {
-                        stopVideoRecording();
-                        return;
-                      }
-
-                      _isAudioMode.value = !isAudioMode;
-                    },
-                    onLongPressStart: (_) async {
-                      if (isAudioMode) {
-                        await startAudioRecording();
-                      } else {
-                        await startVideoRecording();
-                      }
-                    },
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: isRecording ? Colors.red : Theme.of(context).colorScheme.primary,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Center(
-                        child: Icon(
-                          isAudioMode
-                              ? (isRecording ? Icons.mic : Icons.mic_none)
-                              : Icons.videocam,
-                          color: Colors.white,
-                        ),
-                      ),
+          ValueListenableBuilder<String>(
+            valueListenable: _messageText,
+            builder: (context, text, child) {
+              // Non-empty text turns the trailing button into a send button;
+              // an empty field falls back to the audio/video recorder.
+              if (text.trim().isNotEmpty) {
+                return GestureDetector(
+                  onTap: _sendMessage,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      shape: BoxShape.circle,
                     ),
+                    child: const Center(
+                      child: Icon(Icons.send, color: Colors.white),
+                    ),
+                  ),
+                );
+              }
+
+              return ValueListenableBuilder<bool>(
+                valueListenable: _isAudioMode,
+                builder: (context, isAudioMode, child) {
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: _isRecording,
+                    builder: (context, isRecording, child) {
+                      return GestureDetector(
+                        onTap: () {
+                          if (_isAudioMode.value && _isRecording.value) {
+                            stopAudioRecording();
+                            return;
+                          } else if (!_isAudioMode.value && _isRecording.value) {
+                            stopVideoRecording();
+                            return;
+                          }
+
+                          _isAudioMode.value = !isAudioMode;
+                        },
+                        onLongPressStart: (_) async {
+                          if (isAudioMode) {
+                            await startAudioRecording();
+                          } else {
+                            await startVideoRecording();
+                          }
+                        },
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: isRecording ? Colors.red : Theme.of(context).colorScheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Icon(
+                              isAudioMode
+                                  ? (isRecording ? Icons.mic : Icons.mic_none)
+                                  : Icons.videocam,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   );
                 },
               );
@@ -295,6 +332,7 @@ class _ChatPageState extends State<ChatPage> {
           )
         ],
       ),
+    ),
     );
   }
 

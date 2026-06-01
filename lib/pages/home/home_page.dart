@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_view.dart';
@@ -31,12 +30,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final Map<String, bool> _fileExistsCache = {};
   final Map<String, Uint8List?> _miniThumbnailCache = {};
 
+  StreamSubscription<Map<String, dynamic>>? _chatSubscription;
+  StreamSubscription<Map<String, dynamic>>? _filesSubscription;
+
   @override
   void initState() {
     super.initState();
     _loadChats();
 
-    TDLibClient.chatUpdates.listen((update) async {
+    _chatSubscription = TDLibClient.chatUpdates.listen((update) async {
+      if (!mounted) return;
       final type = update['@type'];
       switch (type) {
         case updateNewChatConst:
@@ -205,27 +208,52 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
     });
 
-    TDLibClient.filesUpdates.listen((update) async {
-      final type = update['@type'];
-      switch (type) {
-        case updateFileConst:
-          final fileId = update['file']?['id'];
-          final path = update['file']?['local']?['path'];
+    _filesSubscription = TDLibClient.filesUpdates.listen((update) async {
+      if (!mounted) return;
+      if (update['@type'] != updateFileConst) return;
 
-          if (path != null && fileId != null) {
-            final exists = await File(path).exists();
-            if (_fileExistsCache[path] != exists) {
-              _fileExistsCache[path] = exists;
-              final updatedChats = chats.value;
-              chats.value = updatedChats;
-            }
-          }
+      final file = update['file'];
+      final fileId = file?['id'];
+      final path = file?['local']?['path'] as String?;
+      final isComplete = file?['local']?['isDownloadingCompleted'] == true;
+
+      // Only react to fully downloaded files; reacting to progress updates
+      // would risk rendering a partially written image.
+      if (fileId == null || !isComplete || path == null || path.isEmpty) {
+        return;
       }
+
+      // Patch the freshly downloaded file back into any chat whose avatar
+      // references it. Without this the chat keeps its empty initial path and
+      // the avatar only appears after a restart (once it loads from the DB).
+      final updatedChats = Map<int, Map<String, dynamic>>.from(chats.value);
+      var changed = false;
+
+      for (final chatId in updatedChats.keys) {
+        final chat = updatedChats[chatId]!;
+        final small = chat['photo']?['small'];
+        if (small != null && small['id'] == fileId) {
+          final photo = Map<String, dynamic>.from(chat['photo']);
+          photo['small'] = file;
+          updatedChats[chatId] = {...chat, 'photo': photo};
+          _fileExistsCache[path] = true;
+          changed = true;
+        }
+      }
+
+      // Assign a new map instance so the ValueNotifier actually notifies its
+      // listeners; reusing the same reference would be a silent no-op.
+      if (changed) chats.value = updatedChats;
     });
   }
 
   Future<void> _loadChats() async {
     try {
+      // Recover chats TDLib already holds in memory. On a Dart hot restart the
+      // native session persists but won't re-push updateNewChat, so without
+      // this the list would come up empty until a full cold start.
+      await _syncLoadedChats();
+
       while (true) {
         var type = await TDLibClient.loadChats();
         if (type != "Ok") break;
@@ -236,6 +264,37 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       logger.e('Failed to load chats: $e');
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  /// Pulls the chats currently loaded in TDLib's main list and merges them into
+  /// [chats]. Safe to call repeatedly; existing entries are simply refreshed.
+  Future<void> _syncLoadedChats() async {
+    final chatIds = await TDLibClient.getChats();
+    if (!mounted || chatIds.isEmpty) return;
+
+    final updatedChats = Map<int, Map<String, dynamic>>.from(chats.value);
+    for (final chatId in chatIds) {
+      final chat = await TDLibClient.getChat(chatId: chatId);
+      if (chat == null) continue;
+      _maybeDownloadChatPhoto(chat);
+      updatedChats[chatId] = chat;
+    }
+
+    if (!mounted) return;
+    chats.value = updatedChats;
+    _updateFolderUnreadCounts();
+    setState(() {});
+  }
+
+  /// Requests the small chat photo when it isn't downloaded yet.
+  void _maybeDownloadChatPhoto(Map<String, dynamic> chat) {
+    final photo = chat['photo'];
+    if (photo != null &&
+        photo['small']?['local']?['path'] == "" &&
+        photo['small']?['remote']?['id'] != null) {
+      TDLibClient.downloadFile(fileId: photo['small']['id'])
+          .catchError((_) {});
     }
   }
 
@@ -269,6 +328,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _chatSubscription?.cancel();
+    _filesSubscription?.cancel();
     _tabController?.dispose();
     super.dispose();
   }

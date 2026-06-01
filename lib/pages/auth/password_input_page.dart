@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../tdlib/tdlib_client.dart';
+import 'widgets/auth_widgets.dart';
 
+/// Two-factor authentication password screen.
 class PasswordInputPage extends StatefulWidget {
   final String passwordHint;
 
@@ -12,95 +14,84 @@ class PasswordInputPage extends StatefulWidget {
 }
 
 class _PasswordInputPageState extends State<PasswordInputPage> {
-  final TextEditingController _passwordController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _isSubmitting = ValueNotifier<bool>(false);
+  final _obscure = ValueNotifier<bool>(true);
 
-  final isSubmitting = ValueNotifier<bool>(false);
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    _isSubmitting.dispose();
+    _obscure.dispose();
+    super.dispose();
+  }
 
-  void _submitPassword() async {
-    final password = _passwordController.text.trim();
+  Future<void> _submitPassword() async {
+    final password = _passwordController.text;
     if (password.isEmpty) return;
 
-    isSubmitting.value = true;
-
+    _isSubmitting.value = true;
     try {
       await TDLibClient.checkAuthenticationPassword(password: password);
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
     } finally {
-      isSubmitting.value = false;
+      _isSubmitting.value = false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final subtitle = widget.passwordHint.isNotEmpty
+        ? 'Hint: ${widget.passwordHint}'
+        : 'Your account is protected with a password';
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Input Password')),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Hint: ${widget.passwordHint}',
-                style: theme.textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.lock),
-                  hintText: 'Input your password',
-                  filled: true,
-                  fillColor: isDark ? Colors.grey[900] : Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    vertical: 16,
-                    horizontal: 16,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ValueListenableBuilder<bool>(
-                  valueListenable: isSubmitting,
-                  builder: (context, submitting, _) {
-                    if (submitting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    return ElevatedButton(
-                      onPressed: _submitPassword,
-                      style: ElevatedButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text(
-                        'Submit',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+    return AuthScaffold(
+      showBackButton: true,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AuthHeader(
+            title: 'Enter your password',
+            subtitle: subtitle,
+            icon: Icons.lock_outline,
           ),
-        ),
+          const SizedBox(height: 32),
+          AuthInputContainer(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _obscure,
+              builder: (context, obscure, _) => TextField(
+                controller: _passwordController,
+                obscureText: obscure,
+                autofocus: true,
+                decoration: authInputDecoration(
+                  hintText: 'Password',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                ).copyWith(
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      obscure ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () => _obscure.value = !obscure,
+                  ),
+                ),
+                onSubmitted: (_) => _submitPassword(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          ValueListenableBuilder<bool>(
+            valueListenable: _isSubmitting,
+            builder: (context, submitting, _) => AuthPrimaryButton(
+              label: 'Submit',
+              loading: submitting,
+              onPressed: _submitPassword,
+            ),
+          ),
+        ],
       ),
     );
   }

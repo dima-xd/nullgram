@@ -1,43 +1,75 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
+import 'widgets/auth_widgets.dart';
+
+/// Screen for entering the login code sent to the user's phone.
 class CodeInputPage extends StatefulWidget {
-  const CodeInputPage({super.key});
+  const CodeInputPage({this.phoneNumber, this.timeout, super.key});
+
+  /// The phone number the code was sent to, shown for confirmation.
+  final String? phoneNumber;
+
+  /// Seconds to wait before the code can be resent, from TDLib's `codeInfo`.
+  final int? timeout;
 
   @override
   State<CodeInputPage> createState() => _CodeInputPageState();
 }
 
 class _CodeInputPageState extends State<CodeInputPage> {
-  final isLoading = ValueNotifier<bool>(false);
-  final TextEditingController _codeController = TextEditingController();
-  final hasError = ValueNotifier<bool>(false);
+  static const _codeLength = 5;
+
+  final _isLoading = ValueNotifier<bool>(false);
+  final _hasError = ValueNotifier<bool>(false);
+  final _secondsLeft = ValueNotifier<int>(0);
+  final _codeController = TextEditingController();
+  Timer? _resendTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startResendCountdown(widget.timeout ?? 60);
+  }
 
   @override
   void dispose() {
+    _resendTimer?.cancel();
     _codeController.dispose();
+    _isLoading.dispose();
+    _hasError.dispose();
+    _secondsLeft.dispose();
     super.dispose();
   }
 
-  void _verifyCode() async {
+  void _startResendCountdown(int seconds) {
+    _resendTimer?.cancel();
+    _secondsLeft.value = seconds;
+    if (seconds <= 0) return;
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsLeft.value <= 1) {
+        _secondsLeft.value = 0;
+        timer.cancel();
+      } else {
+        _secondsLeft.value -= 1;
+      }
+    });
+  }
+
+  Future<void> _verifyCode() async {
     final code = _codeController.text.trim();
-    if (code.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Input the code')),
-      );
-      return;
-    }
+    if (code.length < _codeLength) return;
 
-    isLoading.value = true;
-    hasError.value = false;
-
+    _isLoading.value = true;
+    _hasError.value = false;
     try {
-      var result = await TDLibClient.checkAuthenticationCode(code: code);
-
-      if (result == "PHONE_CODE_INVALID") {
-        hasError.value = true;
-
+      final result = await TDLibClient.checkAuthenticationCode(code: code);
+      if (result == 'PHONE_CODE_INVALID') {
+        _hasError.value = true;
+        _codeController.clear();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -45,157 +77,115 @@ class _CodeInputPageState extends State<CodeInputPage> {
             backgroundColor: Colors.red,
           ),
         );
-        _codeController.clear();
       }
     } catch (e) {
-      hasError.value = true;
-
+      _hasError.value = true;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
     } finally {
-      isLoading.value = false;
+      _isLoading.value = false;
+    }
+  }
+
+  Future<void> _resendCode() async {
+    try {
+      await TDLibClient.resendAuthenticationCode();
+      _startResendCountdown(widget.timeout ?? 60);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Code sent again')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final subtitle = widget.phoneNumber != null
+        ? 'We sent a code to ${widget.phoneNumber}'
+        : 'Enter the code we just sent you';
 
-    return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildHeader(theme),
-              const SizedBox(height: 32),
-              _buildCodeInput(theme, isDark),
-              const SizedBox(height: 24),
-              _buildVerifyButton(theme),
-              const SizedBox(height: 16),
-              Text(
-                'The code was sent to your phone number',
-                style: theme.textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-            ],
+    return AuthScaffold(
+      showBackButton: true,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AuthHeader(
+            title: 'Enter the code',
+            subtitle: subtitle,
+            icon: Icons.sms_outlined,
           ),
-        ),
+          TextButton(
+            onPressed: () => Navigator.maybePop(context),
+            child: const Text('Wrong number?'),
+          ),
+          const SizedBox(height: 16),
+          _buildCodeField(theme),
+          const SizedBox(height: 24),
+          ValueListenableBuilder<bool>(
+            valueListenable: _isLoading,
+            builder: (context, loading, _) => AuthPrimaryButton(
+              label: 'Verify',
+              loading: loading,
+              onPressed: _verifyCode,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _buildResend(theme),
+        ],
       ),
     );
   }
 
-  Widget _buildHeader(ThemeData theme) => Column(
-    children: [
-      Icon(
-        Icons.message,
-        size: 64,
-        color: theme.colorScheme.primary,
-      ),
-      const SizedBox(height: 16),
-      Text(
-        'Input Code',
-        style: theme.textTheme.headlineSmall?.copyWith(
-          fontWeight: FontWeight.bold,
-          color: theme.colorScheme.primary,
+  Widget _buildCodeField(ThemeData theme) => ValueListenableBuilder<bool>(
+        valueListenable: _hasError,
+        builder: (context, error, _) => AuthInputContainer(
+          hasError: error,
+          child: TextField(
+            controller: _codeController,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            autofocus: true,
+            maxLength: _codeLength,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(_codeLength),
+            ],
+            style: theme.textTheme.headlineMedium?.copyWith(
+              letterSpacing: 8,
+              fontWeight: FontWeight.bold,
+              color: error ? theme.colorScheme.error : null,
+            ),
+            decoration: authInputDecoration(
+              hintText: '• • • • •',
+              counterText: '',
+            ),
+            onChanged: (value) {
+              if (_hasError.value) _hasError.value = false;
+              if (value.length == _codeLength) _verifyCode();
+            },
+          ),
         ),
-        textAlign: TextAlign.center,
-      ),
-      const SizedBox(height: 12),
-    ],
-  );
+      );
 
-  Widget _buildCodeInput(ThemeData theme, bool isDark) => ValueListenableBuilder<bool>(
-    valueListenable: hasError,
-    builder: (context, error, _) => Container(
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: error
-            ? Border.all(color: Colors.red, width: 2)
-            : null,
-        boxShadow: [
-          BoxShadow(
-            color: error
-                ? Colors.red.withOpacity(0.3)
-                : Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: TextField(
-        controller: _codeController,
-        keyboardType: TextInputType.number,
-        textAlign: TextAlign.center,
-        maxLength: 5,
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(5),
-        ],
-        style: theme.textTheme.headlineMedium?.copyWith(
-          letterSpacing: 8,
-          fontWeight: FontWeight.bold,
-          color: error ? Colors.red : null,
-        ),
-        decoration: InputDecoration(
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          hintText: '• • • • •',
-          counterText: '',
-          filled: true,
-          fillColor: Colors.transparent,
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 20,
-            horizontal: 16,
-          ),
-        ),
-        onChanged: (_) {
-          if (hasError.value) {
-            hasError.value = false;
-          }
-        },
-      ),
-    ),
-  );
-
-  Widget _buildVerifyButton(ThemeData theme) => ValueListenableBuilder<bool>(
-    valueListenable: isLoading,
-    builder: (context, loading, _) => SizedBox(
-      width: double.infinity,
-      height: 50,
-      child: loading
-          ? const Center(child: CircularProgressIndicator())
-          : ElevatedButton(
-        onPressed: _verifyCode,
-        style: ElevatedButton.styleFrom(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          backgroundColor: theme.colorScheme.primary,
-        ),
-        child: const Text(
-          'Verify',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    ),
-  );
+  Widget _buildResend(ThemeData theme) => ValueListenableBuilder<int>(
+        valueListenable: _secondsLeft,
+        builder: (context, seconds, _) => seconds > 0
+            ? Text(
+                'Resend code in ${seconds}s',
+                style: theme.textTheme.bodySmall,
+                textAlign: TextAlign.center,
+              )
+            : TextButton(
+                onPressed: _resendCode,
+                child: const Text('Resend code'),
+              ),
+      );
 }

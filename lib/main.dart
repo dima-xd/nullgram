@@ -3,9 +3,8 @@ import 'dart:ui';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/auth/code_input_page.dart';
+import 'package:nullgram/pages/auth/login_page.dart';
 import 'package:nullgram/pages/auth/password_input_page.dart';
-import 'package:nullgram/pages/auth/phone_input_page.dart';
-import 'package:nullgram/pages/auth/qr_login_page.dart';
 import 'package:nullgram/pages/home/home_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/tdlib/tdlib_helper.dart';
@@ -15,6 +14,34 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 String? _currentAuthState;
+
+/// Whether [LoginPage] is currently the root of the navigation stack. Used to
+/// decide whether forward auth screens (code, password) can simply be pushed
+/// on top of it, preserving the back stack.
+bool _isLoginRoot = false;
+
+void _postFrame(VoidCallback callback) =>
+    WidgetsBinding.instance.addPostFrameCallback((_) => callback());
+
+/// Replaces the entire stack with [page]. Used for reset/terminal states.
+void _resetTo(Widget page) {
+  _isLoginRoot = page is LoginPage;
+  navigatorKey.currentState?.pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => page),
+    (_) => false,
+  );
+}
+
+/// Pushes [page] on top of the current stack so the user can go back.
+///
+/// When the pushed route is popped (the user navigates back), the cached auth
+/// state is reset to [resetStateOnPop] so a repeat of the same TDLib state
+/// re-triggers navigation instead of being swallowed by the de-dupe guard.
+void _pushAuth(Widget page, {required String resetStateOnPop}) {
+  navigatorKey.currentState
+      ?.push(MaterialPageRoute(builder: (_) => page))
+      .then((_) => _currentAuthState = resetStateOnPop);
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,50 +58,35 @@ void main() async {
 
     switch (authType) {
       case 'AuthorizationStateWaitPhoneNumber':
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          navigatorKey.currentState?.pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (_) => PhoneInputPage(),
-            ),
-                (_) => false,
+        _postFrame(() => _resetTo(const LoginPage()));
+      case 'AuthorizationStateWaitOtherDeviceConfirmation':
+        // QR is shown in-page by LoginPage. Only navigate if the app started
+        // directly in this state without a LoginPage to host it.
+        if (!_isLoginRoot) {
+          _postFrame(
+            () => _resetTo(const LoginPage(initialMode: AuthMode.qr)),
+          );
+        }
+      case 'AuthorizationStateWaitCode':
+        _postFrame(() {
+          final codeInfo = state['codeInfo'] as Map<String, dynamic>?;
+          final page = CodeInputPage(
+            phoneNumber: codeInfo?['phoneNumber'] as String?,
+            timeout: (codeInfo?['timeout'] as num?)?.toInt(),
+          );
+          if (!_isLoginRoot) _resetTo(const LoginPage());
+          _pushAuth(
+            page,
+            resetStateOnPop: 'AuthorizationStateWaitPhoneNumber',
           );
         });
       case 'AuthorizationStateWaitPassword':
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          navigatorKey.currentState?.pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (_) => PasswordInputPage(passwordHint: state['passwordHint']),
-            ),
-                (_) => false,
-          );
-        });
+        _postFrame(() => _pushAuth(
+              PasswordInputPage(passwordHint: state['passwordHint'] ?? ''),
+              resetStateOnPop: 'AuthorizationStateWaitCode',
+            ));
       case 'AuthorizationStateReady':
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          navigatorKey.currentState?.pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (_) => HomePage(),
-            ),
-                (_) => false,
-          );
-        });
-      case 'AuthorizationStateWaitCode':
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          navigatorKey.currentState?.pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (_) => CodeInputPage(),
-            ),
-                (_) => false,
-          );
-        });
-      case 'AuthorizationStateWaitOtherDeviceConfirmation':
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          navigatorKey.currentState?.pushAndRemoveUntil(
-            MaterialPageRoute(
-              builder: (_) => QrLoginPage(),
-            ),
-                (_) => false,
-          );
-        });
+        _postFrame(() => _resetTo(const HomePage()));
     }
   });
 
@@ -112,13 +124,18 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  // Created once so hot reload (which re-runs build) doesn't restart the
+  // future, drop FutureBuilder back to its loading state, and rebuild a fresh
+  // HomePage that loses all in-memory chats.
+  late final Future<bool> _authorized = TDLibHelper.isAuthorized();
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       home: FutureBuilder<bool>(
-        future: TDLibHelper.isAuthorized(),
+        future: _authorized,
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return Scaffold(

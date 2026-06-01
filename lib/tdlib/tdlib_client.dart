@@ -107,6 +107,45 @@ class TDLibClient {
     return null;
   }
 
+  /// Returns the ids of chats already loaded in TDLib's in-memory main list.
+  ///
+  /// Unlike the one-shot `updateNewChat` pushes, this can be called at any time
+  /// to recover the current chat list. This is what lets the chat list survive
+  /// a Dart hot restart: the native TDLib session persists and still holds the
+  /// chats, even though the Dart-side update buffers were wiped.
+  static Future<List<int>> getChats({int limit = 200}) async {
+    final jsonMap = {
+      "@type": "getChats",
+      "chatList": {"@type": "chatListMain"},
+      "limit": limit,
+    };
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return [];
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    return (data["chatIds"] as List?)?.map((e) => e as int).toList() ?? [];
+  }
+
+  /// Fetches the full chat object for [chatId] from TDLib.
+  static Future<Map<String, dynamic>?> getChat({required int chatId}) async {
+    final jsonMap = {"@type": "getChat", "chatId": chatId};
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return null;
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    return Map<String, dynamic>.from(data);
+  }
+
   static Future<String?> loadChats({int limit = 20}) async {
     final jsonMap = {
       "@type": "loadChats",
@@ -160,6 +199,12 @@ class TDLibClient {
   static Future<void> requestQrCodeAuthentication() async {
     await _channel.invokeMethod('send', {
       'json': '{"@type":"requestQrCodeAuthentication"}'
+    });
+  }
+
+  static Future<void> resendAuthenticationCode() async {
+    await _channel.invokeMethod('send', {
+      'json': '{"@type":"resendAuthenticationCode"}'
     });
   }
 
