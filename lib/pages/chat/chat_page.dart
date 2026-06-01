@@ -5,6 +5,7 @@ import 'package:nullgram/pages/chat/utils/albums_grouper.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/widgets/album_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
+import 'package:nullgram/pages/chat/widgets/date_separator.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
@@ -34,7 +35,12 @@ class _ChatPageState extends State<ChatPage> {
   final ValueNotifier<List<Map<String, dynamic>>> _messages = ValueNotifier([]);
   final ValueNotifier<bool> _isLoading = ValueNotifier(false);
   final ValueNotifier<bool> _hasMore = ValueNotifier(true);
+  final ValueNotifier<bool> _showScrollToBottom = ValueNotifier(false);
   final _record = AudioRecorder();
+
+  /// Distance (px) from the bottom past which the jump-to-latest button shows
+  /// and incoming messages stop auto-scrolling.
+  static const double _stickToBottomThreshold = 320;
 
   static const int _batchSize = 50;
 
@@ -47,6 +53,8 @@ class _ChatPageState extends State<ChatPage> {
       _messageText.value = _messageController.text;
     });
 
+    _scrollController.addListener(_onScroll);
+
     _messagesSubscription = TDLibClient.messsagesUpdates.listen((update) async {
       final type = update['@type'];
       switch (type) {
@@ -54,8 +62,10 @@ class _ChatPageState extends State<ChatPage> {
           final message = update['message'];
           if (message['chatId'] == widget.chat['id']) {
             if (!mounted) return;
+            if (_containsMessageId(message['id'])) return;
             _messages.value = AlbumsGrouper.groupMediaAlbums([message, ..._messages.value]);
             setState(() {});
+            _maybeStickToBottom(isOutgoing: message['isOutgoing'] == true);
           }
         case updateDeleteMessagesConst:
           final chatId = update['chatId'];
@@ -77,6 +87,73 @@ class _ChatPageState extends State<ChatPage> {
     _loadLocalMessages();
   }
 
+  /// A stable per-sender key used to group consecutive messages. Albums never
+  /// group with anything, so each gets a unique key.
+  String _senderKey(Map<String, dynamic> message) {
+    if (message['isAlbum'] == true) return 'album_${message['id']}';
+    final sender = message['senderId'];
+    final id = sender?['userId'] ?? sender?['chatId'];
+    if (id != null) return 'id_$id';
+    return message['isOutgoing'] == true ? 'me' : 'other';
+  }
+
+  /// Two messages belong to the same group if from the same sender and sent
+  /// within five minutes of each other.
+  bool _sameGroup(Map<String, dynamic>? a, Map<String, dynamic>? b) {
+    if (a == null || b == null) return false;
+    if (a['isAlbum'] == true || b['isAlbum'] == true) return false;
+    if (_senderKey(a) != _senderKey(b)) return false;
+    final da = a['date'] as int? ?? 0;
+    final db = b['date'] as int? ?? 0;
+    return (da - db).abs() <= 300;
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final show = _scrollController.offset > _stickToBottomThreshold;
+    if (show != _showScrollToBottom.value) _showScrollToBottom.value = show;
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// Keeps the view pinned to the newest message when the user is already near
+  /// the bottom, or always for messages they just sent.
+  void _maybeStickToBottom({required bool isOutgoing}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      if (isOutgoing || _scrollController.offset < _stickToBottomThreshold) {
+        _scrollToBottom();
+      }
+    });
+  }
+
+  /// Whether a message with [id] is already shown, checking both standalone
+  /// messages and members grouped inside album entries.
+  bool _containsMessageId(int id) {
+    for (final entry in _messages.value) {
+      if (entry['isAlbum'] == true) {
+        if ((entry['messages'] as List).any((m) => m['id'] == id)) return true;
+      } else if (entry['id'] == id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Drops any incoming messages already present, so overlapping history loads
+  /// or a live update racing a load can't introduce duplicates.
+  List<Map<String, dynamic>> _withoutDuplicates(
+    List<Map<String, dynamic>> incoming,
+  ) =>
+      incoming.where((m) => !_containsMessageId(m['id'])).toList();
+
   Future<void> _loadLocalMessages() async {
     try {
       while (true) {
@@ -94,8 +171,12 @@ class _ChatPageState extends State<ChatPage> {
 
         if (!mounted) return;
 
-        if (localMessages != null && localMessages.messages.isNotEmpty) {
-          _messages.value = AlbumsGrouper.groupMediaAlbums([..._messages.value, ...localMessages.messages]);
+        final fresh = localMessages == null
+            ? const <Map<String, dynamic>>[]
+            : _withoutDuplicates(localMessages.messages);
+
+        if (fresh.isNotEmpty) {
+          _messages.value = AlbumsGrouper.groupMediaAlbums([..._messages.value, ...fresh]);
           setState(() {});
         } else {
           break;
@@ -128,12 +209,18 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
+    final fresh = _withoutDuplicates(messages.messages);
+    if (fresh.isEmpty) {
+      _isLoading.value = false;
+      return;
+    }
+
     final pos = _scrollController.position;
     final firstVisibleIndex = (_messages.value.isNotEmpty && pos.maxScrollExtent > 0)
         ? (pos.pixels / (pos.maxScrollExtent / _messages.value.length)).round().clamp(0, _messages.value.length - 1)
         : 0;
 
-    _messages.value = AlbumsGrouper.groupMediaAlbums([..._messages.value, ...messages.messages]);
+    _messages.value = AlbumsGrouper.groupMediaAlbums([..._messages.value, ...fresh]);
 
     await Future.delayed(Duration.zero);
 
@@ -150,6 +237,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _messagesSubscription?.cancel();
+    _scrollController.removeListener(_onScroll);
     _messageController.dispose();
     _messageFocusNode.dispose();
     _scrollController.dispose();
@@ -158,6 +246,7 @@ class _ChatPageState extends State<ChatPage> {
     _messages.dispose();
     _isLoading.dispose();
     _hasMore.dispose();
+    _showScrollToBottom.dispose();
     _record.dispose();
     super.dispose();
   }
@@ -401,7 +490,9 @@ class _ChatPageState extends State<ChatPage> {
       body: Column(
         children: [
           Expanded(
-            child: ValueListenableBuilder(
+            child: Stack(
+              children: [
+                ValueListenableBuilder(
               valueListenable: _messages,
               builder: (context, messages, child) {
                 return ValueListenableBuilder<bool>(
@@ -444,22 +535,71 @@ class _ChatPageState extends State<ChatPage> {
                           });
                         }
 
-                        if (message['isAlbum'] == true) {
-                          return AlbumBubble(
-                            albumMessages: message['messages'],
-                            chat: widget.chat,
-                          );
-                        }
+                        // In a reverse list, lower indices are newer. "Older"
+                        // sits above (next index), "newer" below (prev index).
+                        final older = messageIndex + 1 < messages.length
+                            ? messages[messageIndex + 1]
+                            : null;
+                        final newer = messageIndex - 1 >= 0
+                            ? messages[messageIndex - 1]
+                            : null;
 
-                        return MessageBubble(
-                          message: message,
-                          chat: widget.chat,
+                        final isFirstInGroup = !_sameGroup(message, older);
+                        final isLastInGroup = !_sameGroup(message, newer);
+
+                        final showDateSeparator = older == null ||
+                            !MessageFormatter.isSameDay(
+                              message['date'],
+                              older['date'],
+                            );
+
+                        final Widget bubble = message['isAlbum'] == true
+                            ? AlbumBubble(
+                                albumMessages: message['messages'],
+                                chat: widget.chat,
+                              )
+                            : MessageBubble(
+                                message: message,
+                                chat: widget.chat,
+                                isFirstInGroup: isFirstInGroup,
+                                isLastInGroup: isLastInGroup,
+                              );
+
+                        if (!showDateSeparator) return bubble;
+
+                        return Column(
+                          children: [
+                            DateSeparator(
+                              label: MessageFormatter.formatDateSeparator(
+                                message['date'],
+                              ),
+                            ),
+                            bubble,
+                          ],
                         );
                       },
                     );
                   },
                 );
               },
+            ),
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _showScrollToBottom,
+                    builder: (context, show, child) => AnimatedScale(
+                      scale: show ? 1 : 0,
+                      duration: const Duration(milliseconds: 150),
+                      curve: Curves.easeOut,
+                      child: FloatingActionButton.small(
+                        onPressed: _scrollToBottom,
+                        child: const Icon(Icons.keyboard_arrow_down),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           _buildMessageInput(),

@@ -20,7 +20,7 @@ class TDLibClient {
   static final _chatUpdatesController = ReplaySubject<Map<String, dynamic>>();
   static Stream<Map<String, dynamic>> get chatUpdates => _chatUpdatesController.stream;
 
-  static final _messagesController = ReplaySubject<Map<String, dynamic>>();
+  static final _messagesController = PublishSubject<Map<String, dynamic>>();
   static Stream<Map<String, dynamic>> get messsagesUpdates => _messagesController.stream;
 
   static final _filesController = ReplaySubject<Map<String, dynamic>>();

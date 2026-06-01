@@ -5,14 +5,24 @@ import 'message_text.dart';
 import 'message_video.dart';
 import 'interaction_info.dart';
 
+/// A single chat message.
+///
+/// [isFirstInGroup] / [isLastInGroup] describe the message's place in a run of
+/// consecutive messages from the same sender. They drive grouped spacing, the
+/// bubble tail (only the last message in a group gets one), and whether the
+/// sender name and timestamp are shown, so a burst of messages reads as a unit.
 class MessageBubble extends StatelessWidget {
   final Map<String, dynamic> message;
   final Map<String, dynamic> chat;
+  final bool isFirstInGroup;
+  final bool isLastInGroup;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.chat,
+    this.isFirstInGroup = true,
+    this.isLastInGroup = true,
   });
 
   Widget _buildMediaContent(Map<String, dynamic> content, int messageId) {
@@ -24,14 +34,29 @@ class MessageBubble extends StatelessWidget {
       case 'MessageVideo':
         return MessageVideo(content: content);
       case 'MessageAudio':
+      case 'MessageVoiceNote':
         return MessageAudio(content: content);
       default:
         return const SizedBox.shrink();
     }
   }
 
+  /// Rounds all corners except the sender-side bottom corner of the last
+  /// message in a group, which is clipped to form a tail.
+  BorderRadius _bubbleRadius(bool isOutgoing) {
+    const big = Radius.circular(18);
+    const tail = Radius.circular(6);
+    return BorderRadius.only(
+      topLeft: big,
+      topRight: big,
+      bottomLeft: (!isOutgoing && isLastInGroup) ? tail : big,
+      bottomRight: (isOutgoing && isLastInGroup) ? tail : big,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isOutgoing = message['isOutgoing'] ?? false;
     final content = message['content'];
     final contentType = content['@type'];
@@ -40,65 +65,80 @@ class MessageBubble extends StatelessWidget {
 
     final hasMedia = contentType == 'MessagePhoto' ||
         contentType == 'MessageVideo' ||
-        contentType == 'MessageAudio';
+        contentType == 'MessageAudio' ||
+        contentType == 'MessageVoiceNote';
 
     final isSupergroupChat = chat['supergroup'] != null;
-    String? senderName;
+    final senderName =
+        (isSupergroupChat && !isOutgoing && isFirstInGroup) ? chat['title'] : null;
 
-    if (isSupergroupChat && !isOutgoing) {
-      senderName = chat['title'];
-    }
+    final radius = _bubbleRadius(isOutgoing);
+    final bubbleColor =
+        isOutgoing ? scheme.primaryContainer : scheme.surfaceContainerHighest;
+
+    final margin = EdgeInsets.only(
+      left: 12,
+      right: 12,
+      top: isFirstInGroup ? 8 : 2,
+      bottom: 1,
+    );
+
+    final shadow = [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.05),
+        blurRadius: 2,
+        offset: const Offset(0, 1),
+      ),
+    ];
+
+    final senderLabel = senderName == null
+        ? null
+        : Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: Text(
+              senderName,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: scheme.primary,
+              ),
+            ),
+          );
 
     if (hasMedia && !hasCaption) {
       return Align(
         alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          margin: margin,
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.75,
           ),
           child: Column(
-            crossAxisAlignment: isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            crossAxisAlignment:
+                isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
               Container(
                 decoration: BoxDecoration(
-                  color: isOutgoing
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
+                  color: bubbleColor,
+                  borderRadius: radius,
+                  boxShadow: shadow,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (senderName != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                        child: Text(
-                          senderName,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
-                      ),
+                    if (senderLabel != null) senderLabel,
                     ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: radius,
                       child: _buildMediaContent(content, message['id']),
                     ),
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: InteractionInfo(
-                    message: message,
-                    isOutgoing: isOutgoing,
-                  ),
+              if (isLastInGroup)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
+                  child: InteractionInfo(message: message, isOutgoing: isOutgoing),
                 ),
-              ),
             ],
           ),
         ),
@@ -108,47 +148,38 @@ class MessageBubble extends StatelessWidget {
     return Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        margin: margin,
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.75,
         ),
         child: Column(
-          crossAxisAlignment: isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
             if (hasMedia)
               Container(
                 decoration: BoxDecoration(
-                  color: isOutgoing
-                      ? Theme.of(context).colorScheme.primaryContainer
-                      : Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
+                  color: bubbleColor,
+                  borderRadius: radius,
+                  boxShadow: shadow,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (senderName != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                        child: Text(
-                          senderName,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        ),
-                      ),
+                    if (senderLabel != null) senderLabel,
                     ClipRRect(
                       borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(16),
-                        topRight: Radius.circular(16),
+                        topLeft: Radius.circular(18),
+                        topRight: Radius.circular(18),
                       ),
                       child: _buildMediaContent(content, message['id']),
                     ),
                     Container(
-                      constraints: const BoxConstraints(minWidth: double.infinity),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      constraints:
+                          const BoxConstraints(minWidth: double.infinity),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
@@ -171,12 +202,12 @@ class MessageBubble extends StatelessWidget {
             else
               IntrinsicWidth(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isOutgoing
-                        ? Theme.of(context).colorScheme.primaryContainer
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(16),
+                    color: bubbleColor,
+                    borderRadius: radius,
+                    boxShadow: shadow,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -189,21 +220,23 @@ class MessageBubble extends StatelessWidget {
                             senderName,
                             style: TextStyle(
                               fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                              color: scheme.primary,
                             ),
                           ),
                         ),
                       if (contentType == 'MessageText')
                         MessageText(content: content['text']),
-                      const SizedBox(height: 4),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: InteractionInfo(
-                          message: message,
-                          isOutgoing: isOutgoing,
+                      if (isLastInGroup) ...[
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: InteractionInfo(
+                            message: message,
+                            isOutgoing: isOutgoing,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
