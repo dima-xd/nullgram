@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/pages/settings/settings_page.dart';
 
 class HomeMenu extends StatelessWidget {
   const HomeMenu({super.key});
@@ -73,7 +74,13 @@ class HomeMenu extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.settings),
             title: const Text('Settings'),
-            onTap: () => Navigator.pop(context),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsPage()),
+              );
+            },
           ),
         ],
       ),

@@ -53,6 +53,96 @@ class TDLibClient {
     });
   }
 
+  /// Edits the text of a previously sent message.
+  ///
+  /// Only messages where `canBeEdited` is true can be edited; the resulting
+  /// `UpdateMessageContent` / `UpdateMessageEdited` reflect the change live.
+  static Future<void> editMessageText({
+    required int chatId,
+    required int messageId,
+    required String text,
+  }) async {
+    final jsonMap = {
+      "@type": "editMessageText",
+      "chatId": chatId,
+      "messageId": messageId,
+      "inputMessageContent": {
+        "@type": "inputMessageText",
+        "text": {
+          "@type": "formattedText",
+          "text": text,
+        },
+      },
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Searches chats by [query] across the user's chat list and the server.
+  ///
+  /// Returns the matching chat ids; resolve each to a full chat via [getChat].
+  static Future<List<int>> searchChats({
+    required String query,
+    int limit = 50,
+  }) async {
+    final jsonMap = {
+      "@type": "searchChats",
+      "query": query,
+      "limit": limit,
+    };
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return const [];
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    return (data["chatIds"] as List?)?.map((e) => e as int).toList() ?? const [];
+  }
+
+  /// Searches messages containing [query] within a single chat.
+  ///
+  /// Pass [fromMessageId] to page through results (0 starts from the newest).
+  /// Pass [filter] (e.g. `{"@type": "searchMessagesFilterPinned"}`) to restrict
+  /// results to a message category such as pinned messages.
+  static Future<Messages?> searchChatMessages({
+    required int chatId,
+    String query = "",
+    int fromMessageId = 0,
+    int limit = 50,
+    Map<String, dynamic>? filter,
+  }) async {
+    final jsonMap = {
+      "@type": "searchChatMessages",
+      "chatId": chatId,
+      "query": query,
+      "fromMessageId": fromMessageId,
+      "offset": 0,
+      "limit": limit,
+      if (filter != null) "filter": filter,
+    };
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return null;
+    try {
+      final data = result["data"] is String
+          ? jsonDecode(result["data"]) as Map<String, dynamic>
+          : result["data"] as Map<String, dynamic>;
+      return Messages.fromJson(data);
+    } catch (e, stackTrace) {
+      logger.e("Failed to parse search results",
+          error: e, stackTrace: stackTrace);
+      return null;
+    }
+  }
+
   /// Adds an emoji reaction to a message.
   ///
   /// [emoji] is the reaction's text representation (e.g. '👍'). Standard chats
@@ -148,6 +238,103 @@ class TDLibClient {
     }
   }
 
+  /// Pins [messageId] in [chatId] for all members.
+  static Future<void> pinChatMessage({
+    required int chatId,
+    required int messageId,
+    bool disableNotification = false,
+  }) async {
+    final jsonMap = {
+      "@type": "pinChatMessage",
+      "chatId": chatId,
+      "messageId": messageId,
+      "disableNotification": disableNotification,
+      "onlyForSelf": false,
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Unpins a previously pinned message.
+  static Future<void> unpinChatMessage({
+    required int chatId,
+    required int messageId,
+  }) async {
+    final jsonMap = {
+      "@type": "unpinChatMessage",
+      "chatId": chatId,
+      "messageId": messageId,
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Submits the chosen [optionIds] for a poll message. Pass an empty list to
+  /// retract a vote in a non-anonymous, still-open poll.
+  static Future<void> setPollAnswer({
+    required int chatId,
+    required int messageId,
+    required List<int> optionIds,
+  }) async {
+    final jsonMap = {
+      "@type": "setPollAnswer",
+      "chatId": chatId,
+      "messageId": messageId,
+      "optionIds": optionIds,
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Fetches the user object for [userId].
+  ///
+  /// The TDLib `chat` object has no embedded user — only a `type`. For a
+  /// private/secret chat, read the user id from `chat['type']['userId']` and
+  /// resolve the user here.
+  static Future<Map<String, dynamic>?> getUser({required int userId}) async {
+    final jsonMap = {"@type": "getUser", "userId": userId};
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return null;
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    return Map<String, dynamic>.from(data);
+  }
+
+  /// Fetches extended user info (bio, etc.) for [userId].
+  static Future<Map<String, dynamic>?> getUserFullInfo({
+    required int userId,
+  }) async {
+    final jsonMap = {"@type": "getUserFullInfo", "userId": userId};
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return null;
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    return Map<String, dynamic>.from(data);
+  }
+
+  /// Logs the current user out, returning the app to the auth flow.
+  static Future<void> logOut() async {
+    await _channel.invokeMethod('send', {
+      'json': '{"@type":"logOut"}'
+    });
+  }
+
   /// Deletes messages in a chat.
   ///
   /// When [revoke] is true the messages are deleted for all chat members.
@@ -202,6 +389,147 @@ class TDLibClient {
         "title": "",
         "performer": "",
       },
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Sends a photo from a local [path] with an optional [caption].
+  static Future<void> sendPhoto({
+    required int chatId,
+    required String path,
+    String caption = '',
+    int? replyToMessageId,
+  }) =>
+      _sendLocalMedia(
+        chatId: chatId,
+        contentType: 'inputMessagePhoto',
+        fileField: 'photo',
+        path: path,
+        caption: caption,
+        replyToMessageId: replyToMessageId,
+      );
+
+  /// Sends a video from a local [path] with an optional [caption].
+  static Future<void> sendVideo({
+    required int chatId,
+    required String path,
+    String caption = '',
+    int? replyToMessageId,
+  }) =>
+      _sendLocalMedia(
+        chatId: chatId,
+        contentType: 'inputMessageVideo',
+        fileField: 'video',
+        path: path,
+        caption: caption,
+        replyToMessageId: replyToMessageId,
+      );
+
+  /// Sends an arbitrary file from a local [path] as a document.
+  static Future<void> sendDocument({
+    required int chatId,
+    required String path,
+    String caption = '',
+    int? replyToMessageId,
+  }) =>
+      _sendLocalMedia(
+        chatId: chatId,
+        contentType: 'inputMessageDocument',
+        fileField: 'document',
+        path: path,
+        caption: caption,
+        replyToMessageId: replyToMessageId,
+      );
+
+  /// Shared body for the local-file media senders. [fileField] is the TDLib
+  /// input-content field that carries the file (`photo`/`video`/`document`).
+  static Future<void> _sendLocalMedia({
+    required int chatId,
+    required String contentType,
+    required String fileField,
+    required String path,
+    required String caption,
+    int? replyToMessageId,
+  }) async {
+    final jsonMap = {
+      "@type": "sendMessage",
+      "chatId": chatId,
+      if (replyToMessageId != null)
+        "replyTo": {
+          "@type": "inputMessageReplyToMessage",
+          "messageId": replyToMessageId,
+        },
+      "inputMessageContent": {
+        "@type": contentType,
+        fileField: {
+          "@type": "inputFileLocal",
+          "path": path,
+        },
+        if (caption.isNotEmpty)
+          "caption": {
+            "@type": "formattedText",
+            "text": caption,
+          },
+      },
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Marks [messageIds] in [chatId] as viewed. TDLib advances the chat's read
+  /// inbox, clearing the unread count for those and all older messages.
+  ///
+  /// Pass [forceRead] true to mark them read even while the chat is closed.
+  static Future<void> viewMessages({
+    required int chatId,
+    required List<int> messageIds,
+    bool forceRead = false,
+  }) async {
+    if (messageIds.isEmpty) return;
+    final jsonMap = {
+      "@type": "viewMessages",
+      "chatId": chatId,
+      "messageIds": messageIds,
+      "forceRead": forceRead,
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Informs TDLib that the user opened [chatId]. Required for read receipts
+  /// and live updates in supergroups/channels. Pair with [closeChat].
+  static Future<void> openChat({required int chatId}) async {
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode({"@type": "openChat", "chatId": chatId}),
+    });
+  }
+
+  /// Informs TDLib that the user closed [chatId].
+  static Future<void> closeChat({required int chatId}) async {
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode({"@type": "closeChat", "chatId": chatId}),
+    });
+  }
+
+  /// Sends a transient user-activity notification (e.g. "typing") for [chatId].
+  ///
+  /// [action] is a TDLib `ChatAction` object; defaults to typing. Pass a
+  /// `{"@type": "chatActionCancel"}` action to clear the current activity.
+  static Future<void> sendChatAction({
+    required int chatId,
+    Map<String, dynamic> action = const {"@type": "chatActionTyping"},
+  }) async {
+    final jsonMap = {
+      "@type": "sendChatAction",
+      "chatId": chatId,
+      "action": action,
     };
 
     await _channel.invokeMethod('send', {
@@ -413,10 +741,11 @@ class TDLibClient {
         case updateChatFoldersConst || updateNewChatConst || updateChatPositionConst ||
           updateChatLastMessageConst || updateChatAddedToListConst || updateSupergroupFullInfoConst ||
           updateSupergroupConst || updateChatReadInboxConst || updateUserConst ||
-          updateUserStatusConst:
+          updateChatReadOutboxConst || updateChatActionConst || updateUserStatusConst:
           _chatUpdatesController.add(update);
         case updateNewMessageConst || updateDeleteMessagesConst ||
-          updateMessageInteractionInfoConst:
+          updateMessageInteractionInfoConst || updateMessageContentConst ||
+          updateMessageEditedConst:
           _messagesController.add(update);
         case updateFileConst:
           _filesController.add(update);
