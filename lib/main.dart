@@ -7,6 +7,8 @@ import 'package:nullgram/pages/auth/login_page.dart';
 import 'package:nullgram/pages/auth/password_input_page.dart';
 import 'package:nullgram/pages/home/home_page.dart';
 import 'package:nullgram/services/notification_service.dart';
+import 'package:nullgram/services/call_service.dart';
+import 'package:nullgram/pages/call/call_overlay.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/tdlib/tdlib_helper.dart';
 import 'package:path_provider/path_provider.dart';
@@ -55,6 +57,8 @@ void main() async {
   await dotenv.load(fileName: ".env");
 
   TDLibClient.initTdlibUpdates();
+
+  callService = buildCallService();
 
   await NotificationService.instance.init();
 
@@ -148,6 +152,7 @@ class _MyAppState extends State<MyApp> {
       builder: (context, themeMode, child) {
         return MaterialApp(
           navigatorKey: navigatorKey,
+          builder: (context, child) => CallOverlay(child: child!),
           debugShowCheckedModeBanner: false,
           themeMode: themeMode,
           theme: ThemeData(

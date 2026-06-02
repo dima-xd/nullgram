@@ -27,6 +27,7 @@ dependencies:
   flutter_local_notifications: ^21.0.0
   image_picker: ^1.2.2
   file_picker: ^11.0.2
+  ntgcalls_flutter: ^1.0.0
 
 dev_dependencies:
   flutter_test:

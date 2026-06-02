@@ -448,6 +448,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.0"
+  ntgcalls_flutter:
+    dependency: "direct main"
+    description:
+      name: ntgcalls_flutter
+      sha256: a886e3cedcf7c4528e93e3a466216f035f6977e9c8325c61c414dd5363b530d3
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
   path:
     dependency: transitive
     description:

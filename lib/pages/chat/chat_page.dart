@@ -16,6 +16,7 @@ import 'package:nullgram/pages/profile/chat_profile_page.dart';
 import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/services/call_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -238,6 +239,29 @@ class _ChatPageState extends State<ChatPage> {
       return type['userId'] as int?;
     }
     return null;
+  }
+
+  /// Places an outgoing voice call to the private chat's peer.
+  Future<void> _startVoiceCall() async {
+    final userId = _chatUserId();
+    if (userId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Calls are available in private chats only')),
+        );
+      }
+      return;
+    }
+    if (!await _record.hasPermission()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission required')),
+        );
+      }
+      return;
+    }
+    await callService.startCall(userId: userId, isVideo: false);
   }
 
   /// Resolves the chat's user (for the header) and keeps its status live by
@@ -1398,7 +1422,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.call),
-                  onPressed: () {},
+                  onPressed: _startVoiceCall,
                 ),
                 IconButton(
                   icon: const Icon(Icons.more_vert),

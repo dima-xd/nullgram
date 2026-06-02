@@ -19,3 +19,6 @@ const String updateMessageEditedConst = 'UpdateMessageEdited';
 const String updateUnreadMessageCountConst = 'UpdateUnreadMessageCount';
 const String updateChatReadOutboxConst = 'UpdateChatReadOutbox';
 const String updateChatActionConst = 'UpdateChatAction';
+
+const String updateCallConst = 'UpdateCall';
+const String updateNewCallSignalingDataConst = 'UpdateNewCallSignalingData';

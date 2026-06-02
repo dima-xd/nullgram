@@ -26,6 +26,11 @@ class TDLibClient {
   static final _filesController = ReplaySubject<Map<String, dynamic>>();
   static Stream<Map<String, dynamic>> get filesUpdates => _filesController.stream;
 
+  // Call signaling must never replay stale state to a new listener, so this is
+  // a PublishSubject (broadcast, no buffer) unlike chat/file streams.
+  static final _callController = PublishSubject<Map<String, dynamic>>();
+  static Stream<Map<String, dynamic>> get callUpdates => _callController.stream;
+
   static Future<void> sendMessage({
     required int chatId,
     required String text,
@@ -726,6 +731,98 @@ class TDLibClient {
     return result["type"];
   }
 
+  /// Builds the call protocol descriptor TDLib hands to tgcalls.
+  ///
+  /// Layers 65..92 and the tgcalls library versions come straight from the
+  /// TDLib `CallProtocol` documentation; [versions] is `TgCalls.supportedVersions`.
+  static Map<String, dynamic> _callProtocol(List<String> versions) => {
+        "@type": "callProtocol",
+        "udpP2p": true,
+        "udpReflector": true,
+        "minLayer": 65,
+        "maxLayer": 92,
+        "libraryVersions": versions,
+      };
+
+  /// Places an outgoing 1:1 call to [userId].
+  static Future<void> createCall({
+    required int userId,
+    required bool isVideo,
+    required List<String> protocolVersions,
+  }) async {
+    final jsonMap = {
+      "@type": "createCall",
+      "userId": userId,
+      "protocol": _callProtocol(protocolVersions),
+      "isVideo": isVideo,
+    };
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+  }
+
+  /// Accepts an incoming call identified by [callId].
+  static Future<void> acceptCall({
+    required int callId,
+    required List<String> protocolVersions,
+  }) async {
+    final jsonMap = {
+      "@type": "acceptCall",
+      "callId": callId,
+      "protocol": _callProtocol(protocolVersions),
+    };
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+  }
+
+  /// Ends or declines the call [callId].
+  static Future<void> discardCall({
+    required int callId,
+    required bool isVideo,
+    int duration = 0,
+    int connectionId = 0,
+    bool isDisconnected = false,
+  }) async {
+    final jsonMap = {
+      "@type": "discardCall",
+      "callId": callId,
+      "isDisconnected": isDisconnected,
+      "duration": duration,
+      "isVideo": isVideo,
+      "connectionId": connectionId,
+    };
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+  }
+
+  /// Forwards tgcalls-produced signaling [data] to the call [callId].
+  ///
+  /// `data` is a `byte[]` field, so it crosses the channel as Base64 (NO_WRAP)
+  /// — see TdApiConverter.
+  static Future<void> sendCallSignalingData({
+    required int callId,
+    required Uint8List data,
+  }) async {
+    final jsonMap = {
+      "@type": "sendCallSignalingData",
+      "callId": callId,
+      "data": base64Encode(data),
+    };
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+  }
+
+  /// Submits a post-call quality rating (1..5).
+  static Future<void> sendCallRating({
+    required int callId,
+    required int rating,
+    String comment = '',
+  }) async {
+    final jsonMap = {
+      "@type": "sendCallRating",
+      "callId": callId,
+      "rating": rating,
+      "comment": comment,
+      "problems": <Map<String, dynamic>>[],
+    };
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+  }
+
   static void initTdlibUpdates() {
     _updatesChannel.receiveBroadcastStream().listen((event) {
       final update = jsonDecode(event);
@@ -749,6 +846,8 @@ class TDLibClient {
           _messagesController.add(update);
         case updateFileConst:
           _filesController.add(update);
+        case updateCallConst || updateNewCallSignalingDataConst:
+          _callController.add(update);
         default:
           logger.i("Skipped update of type: $type");
       }
