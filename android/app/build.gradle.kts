@@ -26,7 +26,7 @@ android {
 
     defaultConfig {
         applicationId = "org.nullgram"
-        minSdk = flutter.minSdkVersion
+        minSdk = maxOf(23, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

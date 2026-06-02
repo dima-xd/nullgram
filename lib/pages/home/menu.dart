@@ -9,7 +9,9 @@ class HomeMenu extends StatelessWidget {
 
     return Drawer(
       child: ListView(
-        padding: EdgeInsets.zero,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewPadding.bottom,
+        ),
         children: [
           DrawerHeader(
             decoration: BoxDecoration(

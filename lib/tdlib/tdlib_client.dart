@@ -26,10 +26,19 @@ class TDLibClient {
   static final _filesController = ReplaySubject<Map<String, dynamic>>();
   static Stream<Map<String, dynamic>> get filesUpdates => _filesController.stream;
 
-  static Future<void> sendMessage({required int chatId, required String text}) async {
+  static Future<void> sendMessage({
+    required int chatId,
+    required String text,
+    int? replyToMessageId,
+  }) async {
     final jsonMap = {
       "@type": "sendMessage",
       "chatId": chatId,
+      if (replyToMessageId != null)
+        "replyTo": {
+          "@type": "inputMessageReplyToMessage",
+          "messageId": replyToMessageId,
+        },
       "inputMessageContent": {
         "@type": "inputMessageText",
         "text": {
@@ -37,6 +46,141 @@ class TDLibClient {
           "text": text,
         },
       },
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Adds an emoji reaction to a message.
+  ///
+  /// [emoji] is the reaction's text representation (e.g. '👍'). Standard chats
+  /// allow a single chosen reaction; remove the previous one first via
+  /// [removeMessageReaction] to mimic Telegram's replace-on-tap behavior.
+  static Future<void> addMessageReaction({
+    required int chatId,
+    required int messageId,
+    required String emoji,
+    bool isBig = false,
+  }) async {
+    final jsonMap = {
+      "@type": "addMessageReaction",
+      "chatId": chatId,
+      "messageId": messageId,
+      "reactionType": {
+        "@type": "reactionTypeEmoji",
+        "emoji": emoji,
+      },
+      "isBig": isBig,
+      "updateRecentReactions": true,
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Removes a previously added emoji reaction from a message.
+  static Future<void> removeMessageReaction({
+    required int chatId,
+    required int messageId,
+    required String emoji,
+  }) async {
+    final jsonMap = {
+      "@type": "removeMessageReaction",
+      "chatId": chatId,
+      "messageId": messageId,
+      "reactionType": {
+        "@type": "reactionTypeEmoji",
+        "emoji": emoji,
+      },
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Returns the emoji reactions that can be added to the given message.
+  ///
+  /// Only standard emoji reactions are returned (custom and premium-only ones
+  /// are filtered out), drawn from the chat's top and recently used reactions.
+  static Future<List<String>> getMessageAvailableReactions({
+    required int chatId,
+    required int messageId,
+    int rowSize = 8,
+  }) async {
+    final jsonMap = {
+      "@type": "getMessageAvailableReactions",
+      "chatId": chatId,
+      "messageId": messageId,
+      "rowSize": rowSize,
+    };
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return const [];
+
+    try {
+      final data = result["data"] is String
+          ? jsonDecode(result["data"]) as Map<String, dynamic>
+          : result["data"] as Map<String, dynamic>;
+
+      final emojis = <String>[];
+      for (final key in const ['topReactions', 'recentReactions']) {
+        for (final reaction in (data[key] as List? ?? const [])) {
+          if (reaction['needsPremium'] == true) continue;
+          final type = reaction['type'];
+          if (type?['@type'] == 'ReactionTypeEmoji') {
+            final emoji = type['emoji'] as String?;
+            if (emoji != null && !emojis.contains(emoji)) emojis.add(emoji);
+          }
+        }
+      }
+      return emojis;
+    } catch (e, stackTrace) {
+      logger.e("Failed to parse available reactions",
+          error: e, stackTrace: stackTrace);
+      return const [];
+    }
+  }
+
+  /// Deletes messages in a chat.
+  ///
+  /// When [revoke] is true the messages are deleted for all chat members.
+  static Future<void> deleteMessages({
+    required int chatId,
+    required List<int> messageIds,
+    bool revoke = true,
+  }) async {
+    final jsonMap = {
+      "@type": "deleteMessages",
+      "chatId": chatId,
+      "messageIds": messageIds,
+      "revoke": revoke,
+    };
+
+    await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap)
+    });
+  }
+
+  /// Forwards messages from one chat into another.
+  static Future<void> forwardMessages({
+    required int chatId,
+    required int fromChatId,
+    required List<int> messageIds,
+  }) async {
+    final jsonMap = {
+      "@type": "forwardMessages",
+      "chatId": chatId,
+      "fromChatId": fromChatId,
+      "messageIds": messageIds,
+      "sendCopy": false,
+      "removeCaption": false,
     };
 
     await _channel.invokeMethod('send', {
@@ -271,7 +415,8 @@ class TDLibClient {
           updateSupergroupConst || updateChatReadInboxConst || updateUserConst ||
           updateUserStatusConst:
           _chatUpdatesController.add(update);
-        case updateNewMessageConst || updateDeleteMessagesConst:
+        case updateNewMessageConst || updateDeleteMessagesConst ||
+          updateMessageInteractionInfoConst:
           _messagesController.add(update);
         case updateFileConst:
           _filesController.add(update);

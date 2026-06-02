@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:nullgram/pages/chat/utils/albums_grouper.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/widgets/album_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/chat/widgets/date_separator.dart';
+import 'package:nullgram/pages/chat/widgets/forward_chat_picker.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
+import 'package:nullgram/pages/chat/widgets/message_context_menu.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:path_provider/path_provider.dart';
@@ -36,6 +39,10 @@ class _ChatPageState extends State<ChatPage> {
   final ValueNotifier<bool> _isLoading = ValueNotifier(false);
   final ValueNotifier<bool> _hasMore = ValueNotifier(true);
   final ValueNotifier<bool> _showScrollToBottom = ValueNotifier(false);
+
+  /// The message being replied to, or null when composing a fresh message.
+  final ValueNotifier<Map<String, dynamic>?> _replyTo = ValueNotifier(null);
+
   final _record = AudioRecorder();
 
   /// Distance (px) from the bottom past which the jump-to-latest button shows
@@ -77,10 +84,17 @@ class _ChatPageState extends State<ChatPage> {
             _messages.value = _messages.value.where((message) {
               return !messageIds.contains(message['id']);
             }).toList();
-            
+
             setState(() {});
           }
           break;
+        case updateMessageInteractionInfoConst:
+          if (update['chatId'] != widget.chat['id']) return;
+          if (!mounted) return;
+          _applyInteractionInfo(
+            update['messageId'],
+            update['interactionInfo'],
+          );
       }
     });
 
@@ -153,6 +167,161 @@ class _ChatPageState extends State<ChatPage> {
     List<Map<String, dynamic>> incoming,
   ) =>
       incoming.where((m) => !_containsMessageId(m['id'])).toList();
+
+  /// Patches the new [interactionInfo] (view/forward counts and reactions) onto
+  /// the message with [messageId], whether it's standalone or grouped inside an
+  /// album, then refreshes the list so reaction chips redraw live.
+  void _applyInteractionInfo(int messageId, dynamic interactionInfo) {
+    var changed = false;
+    final updated = _messages.value.map((entry) {
+      if (entry['isAlbum'] == true) {
+        final members = entry['messages'] as List;
+        final index = members.indexWhere((m) => m['id'] == messageId);
+        if (index == -1) return entry;
+        members[index] = {
+          ...members[index],
+          'interactionInfo': interactionInfo,
+        };
+        changed = true;
+        return {...entry, 'messages': members};
+      }
+      if (entry['id'] == messageId) {
+        changed = true;
+        return {...entry, 'interactionInfo': interactionInfo};
+      }
+      return entry;
+    }).toList();
+
+    if (changed) {
+      _messages.value = updated;
+      setState(() {});
+    }
+  }
+
+  /// Adds or removes the [emoji] reaction on [message]. Mirrors Telegram's
+  /// single-reaction behavior: tapping a chosen reaction clears it, while a new
+  /// one first removes any currently chosen reactions. The visible state is
+  /// refreshed by the resulting `UpdateMessageInteractionInfo`.
+  Future<void> _toggleReaction(
+    Map<String, dynamic> message,
+    String emoji,
+  ) async {
+    final chatId = widget.chat['id'] as int;
+    final messageId = message['id'] as int;
+    final reactions =
+        message['interactionInfo']?['reactions']?['reactions'] as List? ??
+            const [];
+
+    final chosen = reactions
+        .where((r) =>
+            r['isChosen'] == true && r['type']?['@type'] == 'ReactionTypeEmoji')
+        .map((r) => r['type']['emoji'] as String)
+        .toList();
+
+    if (chosen.contains(emoji)) {
+      await TDLibClient.removeMessageReaction(
+        chatId: chatId,
+        messageId: messageId,
+        emoji: emoji,
+      );
+      return;
+    }
+
+    for (final existing in chosen) {
+      await TDLibClient.removeMessageReaction(
+        chatId: chatId,
+        messageId: messageId,
+        emoji: existing,
+      );
+    }
+    await TDLibClient.addMessageReaction(
+      chatId: chatId,
+      messageId: messageId,
+      emoji: emoji,
+    );
+  }
+
+  /// Opens the long-press context menu and dispatches the chosen action.
+  Future<void> _onMessageLongPress(Map<String, dynamic> message) async {
+    final chatId = widget.chat['id'] as int;
+    final messageId = message['id'] as int;
+
+    final result = await showMessageContextMenu(
+      context: context,
+      availableReactions: TDLibClient.getMessageAvailableReactions(
+        chatId: chatId,
+        messageId: messageId,
+      ),
+      canDelete: message['canBeDeletedForAllUsers'] == true ||
+          message['canBeDeletedOnlyForSelf'] == true,
+    );
+
+    if (result == null || !mounted) return;
+
+    if (result.reactEmoji != null) {
+      await _toggleReaction(message, result.reactEmoji!);
+      return;
+    }
+
+    switch (result.action!) {
+      case MessageMenuAction.reply:
+        _replyTo.value = message;
+        _messageFocusNode.requestFocus();
+      case MessageMenuAction.copy:
+        _copyMessage(message);
+      case MessageMenuAction.forward:
+        await _forwardMessage(message);
+      case MessageMenuAction.delete:
+        await _deleteMessage(message);
+    }
+  }
+
+  /// Copies the message's text or caption to the clipboard.
+  void _copyMessage(Map<String, dynamic> message) {
+    final content = message['content'];
+    final text = content?['text']?['text'] ?? content?['caption']?['text'];
+    if (text is String && text.isNotEmpty) {
+      Clipboard.setData(ClipboardData(text: text));
+    }
+  }
+
+  /// Picks a destination chat and forwards [message] into it.
+  Future<void> _forwardMessage(Map<String, dynamic> message) async {
+    final targetChatId = await showForwardChatPicker(context);
+    if (targetChatId == null) return;
+    await TDLibClient.forwardMessages(
+      chatId: targetChatId,
+      fromChatId: widget.chat['id'],
+      messageIds: [message['id'] as int],
+    );
+  }
+
+  /// Confirms and deletes [message] for all chat members.
+  Future<void> _deleteMessage(Map<String, dynamic> message) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete message?'),
+        content: const Text('This message will be deleted for everyone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    await TDLibClient.deleteMessages(
+      chatId: widget.chat['id'],
+      messageIds: [message['id'] as int],
+    );
+  }
 
   Future<void> _loadLocalMessages() async {
     try {
@@ -247,6 +416,7 @@ class _ChatPageState extends State<ChatPage> {
     _isLoading.dispose();
     _hasMore.dispose();
     _showScrollToBottom.dispose();
+    _replyTo.dispose();
     _record.dispose();
     super.dispose();
   }
@@ -283,15 +453,24 @@ class _ChatPageState extends State<ChatPage> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
+    final replyToMessageId = _replyTo.value?['id'] as int?;
     _messageController.clear();
-    await TDLibClient.sendMessage(chatId: widget.chat['id'], text: text);
+    _replyTo.value = null;
+    await TDLibClient.sendMessage(
+      chatId: widget.chat['id'],
+      text: text,
+      replyToMessageId: replyToMessageId,
+    );
   }
 
   Widget _buildMessageInput() {
     final canSendBasicMessages = widget.chat['permissions']?['canSendBasicMessages'] ?? true;
 
     if (!canSendBasicMessages) {
-      return const SizedBox.shrink();
+      // No composer for channels/restricted chats. Still reserve the bottom
+      // safe-area inset so the newest messages don't slide under the OS
+      // navigation buttons.
+      return SizedBox(height: MediaQuery.of(context).viewPadding.bottom);
     }
 
     return SafeArea(
@@ -306,7 +485,11 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildReplyPreview(),
+          Row(
         children: [
           IconButton(
             icon: const Icon(Icons.emoji_emotions_outlined),
@@ -421,7 +604,73 @@ class _ChatPageState extends State<ChatPage> {
           )
         ],
       ),
+        ],
+      ),
     ),
+    );
+  }
+
+  /// A compact preview of the message being replied to, shown above the
+  /// composer; hidden when no reply is pending.
+  Widget _buildReplyPreview() {
+    return ValueListenableBuilder<Map<String, dynamic>?>(
+      valueListenable: _replyTo,
+      builder: (context, replyTo, child) {
+        if (replyTo == null) return const SizedBox.shrink();
+
+        final scheme = Theme.of(context).colorScheme;
+        final content = replyTo['content'];
+        final preview = content?['text']?['text'] ??
+            content?['caption']?['text'] ??
+            'Message';
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            children: [
+              Container(
+                width: 3,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: scheme.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Reply',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    Text(
+                      preview.toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: scheme.onSurface.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                iconSize: 20,
+                onPressed: () => _replyTo.value = null,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -557,12 +806,16 @@ class _ChatPageState extends State<ChatPage> {
                             ? AlbumBubble(
                                 albumMessages: message['messages'],
                                 chat: widget.chat,
+                                onLongPress: _onMessageLongPress,
+                                onReactionTap: _toggleReaction,
                               )
                             : MessageBubble(
                                 message: message,
                                 chat: widget.chat,
                                 isFirstInGroup: isFirstInGroup,
                                 isLastInGroup: isLastInGroup,
+                                onLongPress: _onMessageLongPress,
+                                onReactionTap: _toggleReaction,
                               );
 
                         if (!showDateSeparator) return bubble;

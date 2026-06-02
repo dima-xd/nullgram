@@ -174,6 +174,9 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
             const SizedBox(height: 8),
             Expanded(
               child: ListView.builder(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewPadding.bottom,
+                ),
                 itemCount: results.length,
                 itemBuilder: (context, index) {
                   final country = results[index];

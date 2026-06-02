@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'message_audio.dart';
 import 'message_photo.dart';
+import 'message_reactions.dart';
 import 'message_text.dart';
 import 'message_video.dart';
 import 'interaction_info.dart';
@@ -17,12 +18,21 @@ class MessageBubble extends StatelessWidget {
   final bool isFirstInGroup;
   final bool isLastInGroup;
 
+  /// Called when the bubble is long-pressed, to open the context menu.
+  final void Function(Map<String, dynamic> message)? onLongPress;
+
+  /// Called when a reaction chip is tapped, to toggle that reaction.
+  final void Function(Map<String, dynamic> message, String emoji)?
+      onReactionTap;
+
   const MessageBubble({
     super.key,
     required this.message,
     required this.chat,
     this.isFirstInGroup = true,
     this.isLastInGroup = true,
+    this.onLongPress,
+    this.onReactionTap,
   });
 
   Widget _buildMediaContent(Map<String, dynamic> content, int messageId) {
@@ -105,8 +115,129 @@ class MessageBubble extends StatelessWidget {
             ),
           );
 
+    final Widget bubbleContent;
+
     if (hasMedia && !hasCaption) {
-      return Align(
+      bubbleContent = Column(
+        crossAxisAlignment:
+            isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: radius,
+              boxShadow: shadow,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (senderLabel != null) senderLabel,
+                ClipRRect(
+                  borderRadius: radius,
+                  child: _buildMediaContent(content, message['id']),
+                ),
+              ],
+            ),
+          ),
+          if (isLastInGroup)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
+              child: InteractionInfo(message: message, isOutgoing: isOutgoing),
+            ),
+        ],
+      );
+    } else if (hasMedia) {
+      bubbleContent = Container(
+        decoration: BoxDecoration(
+          color: bubbleColor,
+          borderRadius: radius,
+          boxShadow: shadow,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (senderLabel != null) senderLabel,
+            ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+              ),
+              child: _buildMediaContent(content, message['id']),
+            ),
+            Container(
+              constraints: const BoxConstraints(minWidth: double.infinity),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  MessageText(content: content['caption']),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: InteractionInfo(
+                      message: message,
+                      isOutgoing: isOutgoing,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      bubbleContent = IntrinsicWidth(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: bubbleColor,
+            borderRadius: radius,
+            boxShadow: shadow,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (senderName != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    senderName,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ),
+              if (contentType == 'MessageText')
+                MessageText(content: content['text']),
+              if (isLastInGroup) ...[
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: InteractionInfo(
+                    message: message,
+                    isOutgoing: isOutgoing,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    final reactionsList =
+        message['interactionInfo']?['reactions']?['reactions'] as List?;
+
+    return GestureDetector(
+      onLongPress:
+          onLongPress == null ? null : () => onLongPress!(message),
+      behavior: HitTestBehavior.opaque,
+      child: Align(
         alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
         child: Container(
           margin: margin,
@@ -116,132 +247,20 @@ class MessageBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment:
                 isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: bubbleColor,
-                  borderRadius: radius,
-                  boxShadow: shadow,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (senderLabel != null) senderLabel,
-                    ClipRRect(
-                      borderRadius: radius,
-                      child: _buildMediaContent(content, message['id']),
-                    ),
-                  ],
-                ),
-              ),
-              if (isLastInGroup)
+              bubbleContent,
+              if (reactionsList != null && reactionsList.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
-                  child: InteractionInfo(message: message, isOutgoing: isOutgoing),
+                  child: MessageReactions(
+                    reactions: reactionsList,
+                    isOutgoing: isOutgoing,
+                    onTap: (emoji) => onReactionTap?.call(message, emoji),
+                  ),
                 ),
             ],
           ),
-        ),
-      );
-    }
-
-    return Align(
-      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: margin,
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (hasMedia)
-              Container(
-                decoration: BoxDecoration(
-                  color: bubbleColor,
-                  borderRadius: radius,
-                  boxShadow: shadow,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (senderLabel != null) senderLabel,
-                    ClipRRect(
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(18),
-                        topRight: Radius.circular(18),
-                      ),
-                      child: _buildMediaContent(content, message['id']),
-                    ),
-                    Container(
-                      constraints:
-                          const BoxConstraints(minWidth: double.infinity),
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          MessageText(content: content['caption']),
-                          const SizedBox(height: 4),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: InteractionInfo(
-                              message: message,
-                              isOutgoing: isOutgoing,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              IntrinsicWidth(
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: bubbleColor,
-                    borderRadius: radius,
-                    boxShadow: shadow,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (senderName != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            senderName,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: scheme.primary,
-                            ),
-                          ),
-                        ),
-                      if (contentType == 'MessageText')
-                        MessageText(content: content['text']),
-                      if (isLastInGroup) ...[
-                        const SizedBox(height: 4),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: InteractionInfo(
-                            message: message,
-                            isOutgoing: isOutgoing,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-          ],
         ),
       ),
     );

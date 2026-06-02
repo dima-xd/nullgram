@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'message_audio.dart';
 import 'message_photo.dart';
+import 'message_reactions.dart';
 import 'message_text.dart';
 import 'message_video.dart';
 import 'interaction_info.dart';
@@ -9,10 +10,19 @@ class AlbumBubble extends StatefulWidget {
   final List<Map<String, dynamic>> albumMessages;
   final Map<String, dynamic> chat;
 
+  /// Called when the album is long-pressed, to open the context menu.
+  final void Function(Map<String, dynamic> message)? onLongPress;
+
+  /// Called when a reaction chip is tapped, to toggle that reaction.
+  final void Function(Map<String, dynamic> message, String emoji)?
+      onReactionTap;
+
   const AlbumBubble({
     super.key,
     required this.albumMessages,
     required this.chat,
+    this.onLongPress,
+    this.onReactionTap,
   });
 
   @override
@@ -53,6 +63,22 @@ class _AlbumBubbleState extends State<AlbumBubble> {
     if (messageCount == 2 || messageCount == 4) return 2;
     if (messageCount == 3) return 3;
     return 2;
+  }
+
+  /// Reaction chips for the album, keyed off its first message (the one that
+  /// carries the album's reactions in TDLib). Empty when there are none.
+  Widget _reactionsRow(Map<String, dynamic> message, bool isOutgoing) {
+    final reactions =
+        message['interactionInfo']?['reactions']?['reactions'] as List?;
+    if (reactions == null || reactions.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
+      child: MessageReactions(
+        reactions: reactions,
+        isOutgoing: isOutgoing,
+        onTap: (emoji) => widget.onReactionTap?.call(message, emoji),
+      ),
+    );
   }
 
   @override
@@ -114,8 +140,15 @@ class _AlbumBubbleState extends State<AlbumBubble> {
       );
     }
 
+    final firstMessage = widget.albumMessages.first;
+
     if (hasCaption) {
-      return Align(
+      return GestureDetector(
+        onLongPress: widget.onLongPress == null
+            ? null
+            : () => widget.onLongPress!(firstMessage),
+        behavior: HitTestBehavior.opaque,
+        child: Align(
         alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -173,13 +206,20 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                   ),
                 ),
               ),
+              _reactionsRow(firstMessage, isOutgoing),
             ],
           ),
         ),
+      ),
       );
     }
 
-    return Align(
+    return GestureDetector(
+      onLongPress: widget.onLongPress == null
+          ? null
+          : () => widget.onLongPress!(firstMessage),
+      behavior: HitTestBehavior.opaque,
+      child: Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -225,8 +265,10 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                 ),
               ),
             ),
+            _reactionsRow(firstMessage, isOutgoing),
           ],
         ),
+      ),
       ),
     );
   }
