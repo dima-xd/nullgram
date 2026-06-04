@@ -5,6 +5,7 @@ import 'package:nullgram/pages/home/widgets/chat_list_view.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import '../chat/chat_page.dart';
+import '../search/search_page.dart';
 import 'menu.dart';
 
 class HomePage extends StatefulWidget {
@@ -152,6 +153,22 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               'positions': mergedPositions,
             };
             chats.value = updatedChats;
+          }
+
+        case updateChatReadInboxConst:
+          final chatId = update['chatId'];
+          final existingChat = chats.value[chatId];
+          if (existingChat != null) {
+            final updatedChats =
+                Map<int, Map<String, dynamic>>.from(chats.value);
+            updatedChats[chatId] = {
+              ...existingChat,
+              'unreadCount': update['unreadCount'] ?? 0,
+              'lastReadInboxMessageId': update['lastReadInboxMessageId'],
+            };
+            chats.value = updatedChats;
+            _updateFolderUnreadCounts();
+            setState(() {});
           }
 
         case updateChatAddedToListConst:
@@ -348,7 +365,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
-            onPressed: () {},
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const SearchPage()),
+            ),
           ),
         ],
         bottom: folders.value.isNotEmpty && _tabController != null

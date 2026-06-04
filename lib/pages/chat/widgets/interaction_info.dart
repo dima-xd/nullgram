@@ -61,6 +61,17 @@ class InteractionInfo extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if ((message['editDate'] as int? ?? 0) > 0) ...[
+              Text(
+                'edited',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+              const SizedBox(width: 4),
+            ],
             Text(
               MessageFormatter.formatTime(message['date']!),
               style: TextStyle(

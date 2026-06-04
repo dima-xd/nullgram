@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:nullgram/pages/chat/utils/albums_grouper.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
@@ -10,8 +12,11 @@ import 'package:nullgram/pages/chat/widgets/date_separator.dart';
 import 'package:nullgram/pages/chat/widgets/forward_chat_picker.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/message_context_menu.dart';
+import 'package:nullgram/pages/profile/chat_profile_page.dart';
+import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/services/call_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -40,8 +45,41 @@ class _ChatPageState extends State<ChatPage> {
   final ValueNotifier<bool> _hasMore = ValueNotifier(true);
   final ValueNotifier<bool> _showScrollToBottom = ValueNotifier(false);
 
+  /// Whether the in-chat message search bar is active.
+  final ValueNotifier<bool> _isSearching = ValueNotifier(false);
+  final ValueNotifier<List<Map<String, dynamic>>> _searchResults =
+      ValueNotifier([]);
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
+
+  /// Pinned messages in this chat, newest first; drives the top pin banner.
+  final ValueNotifier<List<Map<String, dynamic>>> _pinnedMessages =
+      ValueNotifier([]);
+
+  /// The resolved user behind a private/secret chat, kept live via chat
+  /// updates. The TDLib chat object has no embedded user, so it is fetched via
+  /// [TDLibClient.getUser] rather than read from `chat['user']`.
+  final ValueNotifier<Map<String, dynamic>?> _chatUser = ValueNotifier(null);
+  StreamSubscription<Map<String, dynamic>>? _chatSubscription;
+
+  /// A human-readable activity ("typing…") for the other party, shown in the
+  /// header in place of the status, or null when nobody is active.
+  final ValueNotifier<String?> _typingAction = ValueNotifier(null);
+  StreamSubscription<Map<String, dynamic>>? _chatActionSubscription;
+
+  /// Auto-clears [_typingAction] if TDLib stops sending action updates, since a
+  /// `chatActionCancel` is not always delivered.
+  Timer? _typingClearTimer;
+
+  /// When the outgoing typing notification was last sent, used to throttle it.
+  DateTime? _lastTypingSent;
+
   /// The message being replied to, or null when composing a fresh message.
   final ValueNotifier<Map<String, dynamic>?> _replyTo = ValueNotifier(null);
+
+  /// The message being edited, or null when composing a fresh message.
+  /// Mutually exclusive with [_replyTo].
+  final ValueNotifier<Map<String, dynamic>?> _editing = ValueNotifier(null);
 
   final _record = AudioRecorder();
 
@@ -58,6 +96,7 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     _messageController.addListener(() {
       _messageText.value = _messageController.text;
+      if (_messageController.text.trim().isNotEmpty) _notifyTyping();
     });
 
     _scrollController.addListener(_onScroll);
@@ -73,6 +112,12 @@ class _ChatPageState extends State<ChatPage> {
             _messages.value = AlbumsGrouper.groupMediaAlbums([message, ..._messages.value]);
             setState(() {});
             _maybeStickToBottom(isOutgoing: message['isOutgoing'] == true);
+            if (message['isOutgoing'] != true) {
+              TDLibClient.viewMessages(
+                chatId: widget.chat['id'],
+                messageIds: [message['id'] as int],
+              );
+            }
           }
         case updateDeleteMessagesConst:
           final chatId = update['chatId'];
@@ -95,10 +140,164 @@ class _ChatPageState extends State<ChatPage> {
             update['messageId'],
             update['interactionInfo'],
           );
+        case updateMessageContentConst:
+          if (update['chatId'] != widget.chat['id']) return;
+          if (!mounted) return;
+          _patchMessage(
+            update['messageId'],
+            (message) => {...message, 'content': update['newContent']},
+          );
+        case updateMessageEditedConst:
+          if (update['chatId'] != widget.chat['id']) return;
+          if (!mounted) return;
+          _patchMessage(
+            update['messageId'],
+            (message) => {...message, 'editDate': update['editDate']},
+          );
       }
     });
 
     _loadLocalMessages();
+    _loadPinnedMessages();
+    _resolveChatUser();
+    _listenChatActions();
+
+    // Tell TDLib the chat is open so read receipts and channel updates flow.
+    TDLibClient.openChat(chatId: widget.chat['id']);
+    _markReadUpTo(widget.chat['lastMessage']?['id'] as int?);
+
+    // Suppress notifications for the chat currently on screen.
+    NotificationService.instance.activeChatId = widget.chat['id'] as int?;
+  }
+
+  /// Throttled outgoing "typing" notification, sent at most once every few
+  /// seconds while the user keeps editing the composer.
+  void _notifyTyping() {
+    final now = DateTime.now();
+    final last = _lastTypingSent;
+    if (last != null && now.difference(last) < const Duration(seconds: 4)) {
+      return;
+    }
+    _lastTypingSent = now;
+    TDLibClient.sendChatAction(chatId: widget.chat['id']);
+  }
+
+  /// Marks the chat read up to [messageId] (and all older messages).
+  void _markReadUpTo(int? messageId) {
+    if (messageId == null) return;
+    if ((widget.chat['unreadCount'] as int? ?? 0) == 0) return;
+    TDLibClient.viewMessages(
+      chatId: widget.chat['id'],
+      messageIds: [messageId],
+    );
+  }
+
+  /// Listens for the other party's activity in this chat and surfaces it as
+  /// [_typingAction], auto-clearing it after a short idle period.
+  void _listenChatActions() {
+    _chatActionSubscription = TDLibClient.chatUpdates.listen((update) {
+      if (!mounted) return;
+      if (update['@type'] != updateChatActionConst) return;
+      if (update['chatId'] != widget.chat['id']) return;
+
+      final actionType = update['action']?['@type'] as String?;
+      if (actionType == null || actionType == 'ChatActionCancel') {
+        _typingClearTimer?.cancel();
+        _typingAction.value = null;
+        return;
+      }
+
+      _typingAction.value = _describeAction(actionType);
+      _typingClearTimer?.cancel();
+      _typingClearTimer = Timer(
+        const Duration(seconds: 6),
+        () => _typingAction.value = null,
+      );
+    });
+  }
+
+  /// Maps a TDLib `ChatAction` type to a short status line.
+  String _describeAction(String actionType) => switch (actionType) {
+        'ChatActionRecordingVoiceNote' => 'recording voice…',
+        'ChatActionUploadingVoiceNote' => 'sending voice…',
+        'ChatActionRecordingVideo' ||
+        'ChatActionRecordingVideoNote' =>
+          'recording video…',
+        'ChatActionUploadingVideo' ||
+        'ChatActionUploadingVideoNote' =>
+          'sending video…',
+        'ChatActionUploadingPhoto' => 'sending photo…',
+        'ChatActionUploadingDocument' => 'sending file…',
+        _ => 'typing…',
+      };
+
+  /// The user id behind a private/secret chat, read from the chat's type.
+  int? _chatUserId() {
+    final type = widget.chat['type'];
+    final typeName = type?['@type'];
+    if (typeName == 'ChatTypePrivate' || typeName == 'ChatTypeSecret') {
+      return type['userId'] as int?;
+    }
+    return null;
+  }
+
+  /// Places an outgoing voice call to the private chat's peer.
+  Future<void> _startVoiceCall() async {
+    final userId = _chatUserId();
+    if (userId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Calls are available in private chats only')),
+        );
+      }
+      return;
+    }
+    if (!await _record.hasPermission()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission required')),
+        );
+      }
+      return;
+    }
+    await callService.startCall(userId: userId, isVideo: false);
+  }
+
+  /// Resolves the chat's user (for the header) and keeps its status live by
+  /// listening to user/status chat updates.
+  void _resolveChatUser() {
+    final userId = _chatUserId();
+    if (userId == null) return;
+
+    TDLibClient.getUser(userId: userId).then((user) {
+      if (mounted) _chatUser.value = user;
+    }).catchError((_) {});
+
+    _chatSubscription = TDLibClient.chatUpdates.listen((update) {
+      if (!mounted) return;
+      switch (update['@type']) {
+        case updateUserConst:
+          if (update['user']?['id'] == userId) _chatUser.value = update['user'];
+        case updateUserStatusConst:
+          if (update['userId'] == userId && _chatUser.value != null) {
+            _chatUser.value = {
+              ..._chatUser.value!,
+              'status': update['status'],
+            };
+          }
+      }
+    });
+  }
+
+  /// Loads the chat's pinned messages (newest first) for the top banner.
+  Future<void> _loadPinnedMessages() async {
+    final result = await TDLibClient.searchChatMessages(
+      chatId: widget.chat['id'] as int,
+      filter: const {"@type": "searchMessagesFilterPinned"},
+    );
+    if (!mounted) return;
+    _pinnedMessages.value = result?.messages ?? const [];
   }
 
   /// A stable per-sender key used to group consecutive messages. Albums never
@@ -198,6 +397,36 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  /// Applies [transform] to the message with [messageId], whether standalone or
+  /// grouped inside an album, then refreshes the list. Used for live edits.
+  void _patchMessage(
+    int messageId,
+    Map<String, dynamic> Function(Map<String, dynamic> message) transform,
+  ) {
+    var changed = false;
+    final updated = _messages.value.map((entry) {
+      if (entry['isAlbum'] == true) {
+        final members = entry['messages'] as List;
+        final index = members.indexWhere((m) => m['id'] == messageId);
+        if (index == -1) return entry;
+        members[index] =
+            transform(Map<String, dynamic>.from(members[index]));
+        changed = true;
+        return {...entry, 'messages': members};
+      }
+      if (entry['id'] == messageId) {
+        changed = true;
+        return transform(entry);
+      }
+      return entry;
+    }).toList();
+
+    if (changed) {
+      _messages.value = updated;
+      setState(() {});
+    }
+  }
+
   /// Adds or removes the [emoji] reaction on [message]. Mirrors Telegram's
   /// single-reaction behavior: tapping a chosen reaction clears it, while a new
   /// one first removes any currently chosen reactions. The visible state is
@@ -254,6 +483,9 @@ class _ChatPageState extends State<ChatPage> {
       ),
       canDelete: message['canBeDeletedForAllUsers'] == true ||
           message['canBeDeletedOnlyForSelf'] == true,
+      canEdit: message['canBeEdited'] == true,
+      canPin: message['canBePinned'] == true,
+      isPinned: message['isPinned'] == true,
     );
 
     if (result == null || !mounted) return;
@@ -265,15 +497,44 @@ class _ChatPageState extends State<ChatPage> {
 
     switch (result.action!) {
       case MessageMenuAction.reply:
+        _editing.value = null;
         _replyTo.value = message;
         _messageFocusNode.requestFocus();
+      case MessageMenuAction.edit:
+        _startEditing(message);
       case MessageMenuAction.copy:
         _copyMessage(message);
       case MessageMenuAction.forward:
         await _forwardMessage(message);
+      case MessageMenuAction.pin:
+        await TDLibClient.pinChatMessage(
+          chatId: widget.chat['id'],
+          messageId: message['id'] as int,
+        );
+        await _loadPinnedMessages();
+      case MessageMenuAction.unpin:
+        await TDLibClient.unpinChatMessage(
+          chatId: widget.chat['id'],
+          messageId: message['id'] as int,
+        );
+        await _loadPinnedMessages();
       case MessageMenuAction.delete:
         await _deleteMessage(message);
     }
+  }
+
+  /// Enters edit mode for [message]: prefills the composer with its current
+  /// text/caption and focuses the field. Clears any pending reply.
+  void _startEditing(Map<String, dynamic> message) {
+    final content = message['content'];
+    final text = content?['text']?['text'] ?? content?['caption']?['text'] ?? '';
+    _replyTo.value = null;
+    _editing.value = message;
+    _messageController.text = text.toString();
+    _messageController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _messageController.text.length),
+    );
+    _messageFocusNode.requestFocus();
   }
 
   /// Copies the message's text or caption to the clipboard.
@@ -321,6 +582,73 @@ class _ChatPageState extends State<ChatPage> {
       chatId: widget.chat['id'],
       messageIds: [message['id'] as int],
     );
+  }
+
+  void _openSearch() {
+    _isSearching.value = true;
+  }
+
+  void _closeSearch() {
+    _searchDebounce?.cancel();
+    _searchController.clear();
+    _searchResults.value = [];
+    _isSearching.value = false;
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    final query = value.trim();
+    if (query.isEmpty) {
+      _searchResults.value = [];
+      return;
+    }
+    _searchDebounce =
+        Timer(const Duration(milliseconds: 300), () => _runSearch(query));
+  }
+
+  Future<void> _runSearch(String query) async {
+    final result = await TDLibClient.searchChatMessages(
+      chatId: widget.chat['id'] as int,
+      query: query,
+    );
+    if (!mounted) return;
+    _searchResults.value = result?.messages ?? const [];
+  }
+
+  /// Reloads the history window around [messageId] so a search hit becomes
+  /// visible, then scrolls to it. Replaces the current message list rather than
+  /// scrolling the lazy one, since older messages may not be loaded yet.
+  Future<void> _jumpToMessage(int messageId) async {
+    _closeSearch();
+    _isLoading.value = true;
+
+    final window = await TDLibClient.getChatHistory(
+      chatId: widget.chat['id']!,
+      fromMessageId: messageId,
+      offset: -25,
+      limit: 50,
+      onlyLocal: false,
+    );
+
+    if (!mounted) return;
+
+    final messages = window?.messages ?? const <Map<String, dynamic>>[];
+    _messages.value = AlbumsGrouper.groupMediaAlbums([...messages]);
+    _hasMore.value = true;
+    _isLoading.value = false;
+    setState(() {});
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients || _messages.value.isEmpty) return;
+      final index = _messages.value.indexWhere((m) => m['id'] == messageId);
+      if (index < 0) return;
+      final itemHeight =
+          _scrollController.position.maxScrollExtent / _messages.value.length;
+      _scrollController.jumpTo(
+        (index * itemHeight)
+            .clamp(0.0, _scrollController.position.maxScrollExtent),
+      );
+    });
   }
 
   Future<void> _loadLocalMessages() async {
@@ -405,6 +733,13 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    if (NotificationService.instance.activeChatId == widget.chat['id']) {
+      NotificationService.instance.activeChatId = null;
+    }
+    TDLibClient.closeChat(chatId: widget.chat['id']);
+    _typingClearTimer?.cancel();
+    _typingAction.dispose();
+    _chatActionSubscription?.cancel();
     _messagesSubscription?.cancel();
     _scrollController.removeListener(_onScroll);
     _messageController.dispose();
@@ -417,6 +752,14 @@ class _ChatPageState extends State<ChatPage> {
     _hasMore.dispose();
     _showScrollToBottom.dispose();
     _replyTo.dispose();
+    _editing.dispose();
+    _isSearching.dispose();
+    _searchResults.dispose();
+    _searchController.dispose();
+    _searchDebounce?.cancel();
+    _pinnedMessages.dispose();
+    _chatUser.dispose();
+    _chatSubscription?.cancel();
     _record.dispose();
     super.dispose();
   }
@@ -453,6 +796,18 @@ class _ChatPageState extends State<ChatPage> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
+    final editing = _editing.value;
+    if (editing != null) {
+      _messageController.clear();
+      _editing.value = null;
+      await TDLibClient.editMessageText(
+        chatId: widget.chat['id'],
+        messageId: editing['id'] as int,
+        text: text,
+      );
+      return;
+    }
+
     final replyToMessageId = _replyTo.value?['id'] as int?;
     _messageController.clear();
     _replyTo.value = null;
@@ -460,6 +815,94 @@ class _ChatPageState extends State<ChatPage> {
       chatId: widget.chat['id'],
       text: text,
       replyToMessageId: replyToMessageId,
+    );
+  }
+
+  /// Shows the attach options (photo / video / document) and sends the picked
+  /// file, using any composer text as its caption.
+  void _showAttachMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_outlined),
+              title: const Text('Photo'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _pickAndSendImage(isVideo: false);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Video'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _pickAndSendImage(isVideo: true);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.insert_drive_file_outlined),
+              title: const Text('Document'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _pickAndSendDocument();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Consumes the composer's text as a caption and the active reply target,
+  /// clearing both so the next message starts fresh.
+  ({String caption, int? replyToMessageId}) _consumeComposer() {
+    final caption = _messageController.text.trim();
+    final replyToMessageId = _replyTo.value?['id'] as int?;
+    _messageController.clear();
+    _replyTo.value = null;
+    return (caption: caption, replyToMessageId: replyToMessageId);
+  }
+
+  Future<void> _pickAndSendImage({required bool isVideo}) async {
+    final picker = ImagePicker();
+    final file = isVideo
+        ? await picker.pickVideo(source: ImageSource.gallery)
+        : await picker.pickImage(source: ImageSource.gallery);
+    if (file == null) return;
+
+    final composer = _consumeComposer();
+    final chatId = widget.chat['id'] as int;
+    if (isVideo) {
+      await TDLibClient.sendVideo(
+        chatId: chatId,
+        path: file.path,
+        caption: composer.caption,
+        replyToMessageId: composer.replyToMessageId,
+      );
+    } else {
+      await TDLibClient.sendPhoto(
+        chatId: chatId,
+        path: file.path,
+        caption: composer.caption,
+        replyToMessageId: composer.replyToMessageId,
+      );
+    }
+  }
+
+  Future<void> _pickAndSendDocument() async {
+    final result = await FilePicker.pickFiles();
+    final path = result?.files.single.path;
+    if (path == null) return;
+
+    final composer = _consumeComposer();
+    await TDLibClient.sendDocument(
+      chatId: widget.chat['id'] as int,
+      path: path,
+      caption: composer.caption,
+      replyToMessageId: composer.replyToMessageId,
     );
   }
 
@@ -488,6 +931,7 @@ class _ChatPageState extends State<ChatPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          _buildEditPreview(),
           _buildReplyPreview(),
           Row(
         children: [
@@ -520,7 +964,7 @@ class _ChatPageState extends State<ChatPage> {
                   ),
                   const SizedBox(width: 8),
                   InkWell(
-                    onTap: () {},
+                    onTap: _showAttachMenu,
                     borderRadius: BorderRadius.circular(16),
                     child: const Padding(
                       padding: EdgeInsets.all(4),
@@ -610,6 +1054,191 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// A banner under the app bar showing the most recent pinned message; tapping
+  /// it jumps to that message. Hidden when nothing is pinned.
+  Widget _buildPinnedBanner() {
+    return ValueListenableBuilder<List<Map<String, dynamic>>>(
+      valueListenable: _pinnedMessages,
+      builder: (context, pinned, child) {
+        if (pinned.isEmpty) return const SizedBox.shrink();
+        final scheme = Theme.of(context).colorScheme;
+        final message = pinned.first;
+        final content = message['content'];
+        final preview = content?['text']?['text'] ??
+            content?['caption']?['text'] ??
+            'Pinned message';
+
+        return InkWell(
+          onTap: () => _jumpToMessage(message['id'] as int),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              border: Border(
+                bottom: BorderSide(color: scheme.onSurface.withValues(alpha: 0.1)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 3,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        pinned.length > 1
+                            ? 'Pinned messages (${pinned.length})'
+                            : 'Pinned message',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.primary,
+                        ),
+                      ),
+                      Text(
+                        preview.toString(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: scheme.onSurface.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.push_pin, size: 18, color: scheme.primary),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// A full-height overlay listing in-chat search hits while search is active.
+  /// Tapping a hit jumps to that message in the history.
+  Widget _buildSearchResults() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _isSearching,
+      builder: (context, isSearching, child) {
+        if (!isSearching) return const SizedBox.shrink();
+        final scheme = Theme.of(context).colorScheme;
+
+        return Positioned.fill(
+          child: Container(
+            color: scheme.surface,
+            child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+              valueListenable: _searchResults,
+              builder: (context, results, child) {
+                if (results.isEmpty) {
+                  return Center(
+                    child: Text(
+                      _searchController.text.trim().isEmpty
+                          ? 'Type to search messages'
+                          : 'No messages found',
+                    ),
+                  );
+                }
+                return ListView.builder(
+                  itemCount: results.length,
+                  itemBuilder: (context, index) {
+                    final message = results[index];
+                    final content = message['content'];
+                    final preview = content?['text']?['text'] ??
+                        content?['caption']?['text'] ??
+                        'Message';
+                    return ListTile(
+                      title: Text(
+                        preview.toString(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        MessageFormatter.formatDateSeparator(message['date']),
+                      ),
+                      onTap: () => _jumpToMessage(message['id'] as int),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// A compact preview of the message being edited, shown above the composer;
+  /// hidden when no edit is in progress. Closing it cancels the edit and clears
+  /// the prefilled text.
+  Widget _buildEditPreview() {
+    return ValueListenableBuilder<Map<String, dynamic>?>(
+      valueListenable: _editing,
+      builder: (context, editing, child) {
+        if (editing == null) return const SizedBox.shrink();
+
+        final scheme = Theme.of(context).colorScheme;
+        final content = editing['content'];
+        final preview = content?['text']?['text'] ??
+            content?['caption']?['text'] ??
+            'Message';
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            children: [
+              Icon(Icons.edit, size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Edit message',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: scheme.primary,
+                      ),
+                    ),
+                    Text(
+                      preview.toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: scheme.onSurface.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close),
+                iconSize: 20,
+                onPressed: () {
+                  _editing.value = null;
+                  _messageController.clear();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   /// A compact preview of the message being replied to, shown above the
   /// composer; hidden when no reply is pending.
   Widget _buildReplyPreview() {
@@ -685,59 +1314,128 @@ class _ChatPageState extends State<ChatPage> {
         }
       },
       child: Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        title: InkWell(
-          onTap: () {},
-          child: Row(
-            children: [
-              ChatAvatar(chat: widget.chat, radius: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.chat['title'] ?? 'Chat',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (widget.chat['user'] != null)
-                      Text(
-                        MessageFormatter.getUserStatus(widget.chat['user']!),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                        ),
-                      ),
-                    if (widget.chat['supergroup'] != null)
-                      Text(
-                        "${NumberFormat('#,###', 'en_US').format(widget.chat['supergroup']['memberCount'] ?? 0)} subscribers",
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                        ),
-                      ),
-                  ],
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _isSearching,
+          builder: (context, isSearching, child) {
+            if (isSearching) {
+              return AppBar(
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: _closeSearch,
                 ),
+                titleSpacing: 0,
+                title: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  onChanged: _onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    hintText: 'Search messages...',
+                    border: InputBorder.none,
+                  ),
+                ),
+              );
+            }
+            return AppBar(
+              titleSpacing: 0,
+              title: ValueListenableBuilder<Map<String, dynamic>?>(
+                valueListenable: _chatUser,
+                builder: (context, user, child) {
+                  // Merge the resolved user into the chat so the avatar's
+                  // online/bot indicator and the profile screen see it; the
+                  // TDLib chat object itself carries no user.
+                  final chatWithUser = user == null
+                      ? widget.chat
+                      : {...widget.chat, 'user': user};
+                  return InkWell(
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            ChatProfilePage(chat: chatWithUser),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        ChatAvatar(chat: chatWithUser, radius: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.chat['title'] ?? 'Chat',
+                                style: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w500),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              ValueListenableBuilder<String?>(
+                                valueListenable: _typingAction,
+                                builder: (context, typing, _) {
+                                  if (typing != null) {
+                                    return Text(
+                                      typing,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color:
+                                            Theme.of(context).colorScheme.primary,
+                                      ),
+                                    );
+                                  }
+                                  final mutedStyle = TextStyle(
+                                    fontSize: 13,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.6),
+                                  );
+                                  if (user != null) {
+                                    return Text(
+                                      MessageFormatter.getUserStatus(user),
+                                      style: mutedStyle,
+                                    );
+                                  }
+                                  if (widget.chat['supergroup'] != null) {
+                                    return Text(
+                                      "${NumberFormat('#,###', 'en_US').format(widget.chat['supergroup']['memberCount'] ?? 0)} subscribers",
+                                      style: mutedStyle,
+                                    );
+                                  }
+                                  return const SizedBox.shrink();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
-            ],
-          ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.search),
+                  onPressed: _openSearch,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.call),
+                  onPressed: _startVoiceCall,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.more_vert),
+                  onPressed: () {},
+                ),
+              ],
+            );
+          },
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.call),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () {},
-          ),
-        ],
       ),
       body: Column(
         children: [
+          _buildPinnedBanner(),
           Expanded(
             child: Stack(
               children: [
@@ -852,6 +1550,7 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   ),
                 ),
+                _buildSearchResults(),
               ],
             ),
           ),

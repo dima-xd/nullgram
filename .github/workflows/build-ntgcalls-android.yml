@@ -1,0 +1,75 @@
+name: Build ntgcalls Android AAR
+
+on:
+  workflow_dispatch:
+    inputs:
+      ntgcalls_ref:
+        description: "pytgcalls/ntgcalls git tag/ref to build"
+        default: "v2.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-aar:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout ntgcalls (recursive submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: pytgcalls/ntgcalls
+          ref: ${{ inputs.ntgcalls_ref || 'v2.1.0' }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk || true
+          df -h /
+
+      - name: Resolve Android NDK
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "Using NDK: $ANDROID_NDK_LATEST_HOME"
+
+      - name: Build native libs for all ABIs
+        run: python setup.py build_lib --android
+
+      - name: Assemble release AAR
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Locate AAR
+        id: aar
+        run: |
+          found=$(find android/app/build/outputs/aar -name '*.aar' | head -1)
+          echo "Found AAR: $found"
+          echo "path=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Upload AAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ntgcalls-android-aar
+          path: ${{ steps.aar.outputs.path }}
+          if-no-files-found: error

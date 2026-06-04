@@ -6,12 +6,20 @@ import 'package:nullgram/pages/auth/code_input_page.dart';
 import 'package:nullgram/pages/auth/login_page.dart';
 import 'package:nullgram/pages/auth/password_input_page.dart';
 import 'package:nullgram/pages/home/home_page.dart';
+import 'package:nullgram/services/notification_service.dart';
+import 'package:nullgram/services/call_service.dart';
+import 'package:nullgram/pages/call/call_overlay.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/tdlib/tdlib_helper.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+/// App-wide theme mode, toggled from the settings screen. Defaults to following
+/// the system setting.
+final ValueNotifier<ThemeMode> themeModeNotifier =
+    ValueNotifier(ThemeMode.system);
 
 String? _currentAuthState;
 
@@ -50,6 +58,10 @@ void main() async {
 
   TDLibClient.initTdlibUpdates();
 
+  callService = buildCallService();
+
+  await NotificationService.instance.init();
+
   TDLibClient.authStateUpdates.listen((state) {
     final authType = state['@type'];
 
@@ -86,7 +98,11 @@ void main() async {
               resetStateOnPop: 'AuthorizationStateWaitCode',
             ));
       case 'AuthorizationStateReady':
-        _postFrame(() => _resetTo(const HomePage()));
+        NotificationService.instance.start();
+        _postFrame(() {
+          _resetTo(const HomePage());
+          NotificationService.instance.requestPermission();
+        });
     }
   });
 
@@ -131,22 +147,42 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      debugShowCheckedModeBanner: false,
-      home: FutureBuilder<bool>(
-        future: _authorized,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
-          return snapshot.data! ? HomePage() : Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        },
-      ),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeModeNotifier,
+      builder: (context, themeMode, child) {
+        return MaterialApp(
+          navigatorKey: navigatorKey,
+          builder: (context, child) => CallOverlay(child: child!),
+          debugShowCheckedModeBanner: false,
+          themeMode: themeMode,
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.blue,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          home: FutureBuilder<bool>(
+            future: _authorized,
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+              return snapshot.data!
+                  ? const HomePage()
+                  : const Scaffold(
+                      body: Center(child: CircularProgressIndicator()),
+                    );
+            },
+          ),
+        );
+      },
     );
   }
 }

@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'message_animation.dart';
 import 'message_audio.dart';
+import 'message_document.dart';
 import 'message_photo.dart';
+import 'message_poll.dart';
 import 'message_reactions.dart';
+import 'message_sender_avatar.dart';
+import 'message_sticker.dart';
 import 'message_text.dart';
 import 'message_video.dart';
 import 'interaction_info.dart';
@@ -46,6 +51,12 @@ class MessageBubble extends StatelessWidget {
       case 'MessageAudio':
       case 'MessageVoiceNote':
         return MessageAudio(content: content);
+      case 'MessageDocument':
+        return MessageDocument(content: content);
+      case 'MessageSticker':
+        return MessageSticker(content: content);
+      case 'MessageAnimation':
+        return MessageAnimation(content: content);
       default:
         return const SizedBox.shrink();
     }
@@ -76,11 +87,22 @@ class MessageBubble extends StatelessWidget {
     final hasMedia = contentType == 'MessagePhoto' ||
         contentType == 'MessageVideo' ||
         contentType == 'MessageAudio' ||
-        contentType == 'MessageVoiceNote';
+        contentType == 'MessageVoiceNote' ||
+        contentType == 'MessageDocument' ||
+        contentType == 'MessageSticker' ||
+        contentType == 'MessageAnimation';
 
     final isSupergroupChat = chat['supergroup'] != null;
     final senderName =
         (isSupergroupChat && !isOutgoing && isFirstInGroup) ? chat['title'] : null;
+
+    // Group chats (basic groups and non-channel supergroups) show a sender
+    // avatar beside incoming messages; private chats and channels do not.
+    final chatType = chat['type']?['@type'];
+    final isGroupChat = chatType == 'ChatTypeBasicGroup' ||
+        (chatType == 'ChatTypeSupergroup' && chat['type']?['isChannel'] != true);
+    final showAvatar = isGroupChat && !isOutgoing;
+    const double avatarRadius = 16;
 
     final radius = _bubbleRadius(isOutgoing);
     final bubbleColor =
@@ -214,6 +236,15 @@ class MessageBubble extends StatelessWidget {
                 ),
               if (contentType == 'MessageText')
                 MessageText(content: content['text']),
+              if (contentType == 'MessagePoll')
+                SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.65,
+                  child: MessagePoll(
+                    poll: content['poll'],
+                    chatId: chat['id'],
+                    messageId: message['id'],
+                  ),
+                ),
               if (isLastInGroup) ...[
                 const SizedBox(height: 4),
                 Align(
@@ -233,35 +264,73 @@ class MessageBubble extends StatelessWidget {
     final reactionsList =
         message['interactionInfo']?['reactions']?['reactions'] as List?;
 
-    return GestureDetector(
-      onLongPress:
-          onLongPress == null ? null : () => onLongPress!(message),
-      behavior: HitTestBehavior.opaque,
-      child: Align(
-        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          margin: margin,
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.75,
-          ),
-          child: Column(
-            crossAxisAlignment:
-                isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+    final bubbleColumn = Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.75,
+      ),
+      child: Column(
+        crossAxisAlignment:
+            isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          bubbleContent,
+          if (reactionsList != null && reactionsList.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
+              child: MessageReactions(
+                reactions: reactionsList,
+                isOutgoing: isOutgoing,
+                onTap: (emoji) => onReactionTap?.call(message, emoji),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    final Widget aligned;
+    if (showAvatar) {
+      // Reserve avatar space for every message in the group so bubbles line up,
+      // but only render the avatar on the last message in the run (Telegram
+      // anchors it to the bottom of the group).
+      final senderId = message['senderId'] as Map<String, dynamic>?;
+      aligned = Align(
+        alignment: Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 8, right: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              bubbleContent,
-              if (reactionsList != null && reactionsList.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
-                  child: MessageReactions(
-                    reactions: reactionsList,
-                    isOutgoing: isOutgoing,
-                    onTap: (emoji) => onReactionTap?.call(message, emoji),
-                  ),
-                ),
+              SizedBox(
+                width: avatarRadius * 2,
+                child: (isLastInGroup && senderId != null)
+                    ? MessageSenderAvatar(
+                        senderId: senderId,
+                        radius: avatarRadius,
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 6),
+              Flexible(child: bubbleColumn),
             ],
           ),
         ),
+      );
+    } else {
+      aligned = Align(
+        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        child: Padding(padding: margin, child: bubbleColumn),
+      );
+    }
+
+    return GestureDetector(
+      onLongPress: onLongPress == null ? null : () => onLongPress!(message),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: showAvatar
+            ? EdgeInsets.only(top: isFirstInGroup ? 8 : 2, bottom: 1)
+            : EdgeInsets.zero,
+        child: aligned,
       ),
     );
   }

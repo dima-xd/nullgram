@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Actions offered by the message context menu.
-enum MessageMenuAction { reply, copy, forward, delete }
+enum MessageMenuAction { reply, edit, copy, forward, pin, unpin, delete }
 
 /// The outcome of a message long-press.
 ///
@@ -25,6 +25,9 @@ Future<MessageMenuResult?> showMessageContextMenu({
   required BuildContext context,
   required Future<List<String>> availableReactions,
   required bool canDelete,
+  bool canEdit = false,
+  bool canPin = false,
+  bool isPinned = false,
 }) {
   return showGeneralDialog<MessageMenuResult>(
     context: context,
@@ -35,6 +38,9 @@ Future<MessageMenuResult?> showMessageContextMenu({
     pageBuilder: (context, animation, secondaryAnimation) => _MessageMenu(
       availableReactions: availableReactions,
       canDelete: canDelete,
+      canEdit: canEdit,
+      canPin: canPin,
+      isPinned: isPinned,
     ),
     transitionBuilder: (context, animation, _, child) {
       final curved = CurvedAnimation(parent: animation, curve: Curves.easeOut);
@@ -52,10 +58,16 @@ Future<MessageMenuResult?> showMessageContextMenu({
 class _MessageMenu extends StatelessWidget {
   final Future<List<String>> availableReactions;
   final bool canDelete;
+  final bool canEdit;
+  final bool canPin;
+  final bool isPinned;
 
   const _MessageMenu({
     required this.availableReactions,
     required this.canDelete,
+    required this.canEdit,
+    required this.canPin,
+    required this.isPinned,
   });
 
   @override
@@ -66,7 +78,12 @@ class _MessageMenu extends StatelessWidget {
         children: [
           _ReactionBar(reactions: availableReactions),
           const SizedBox(height: 12),
-          _MenuList(canDelete: canDelete),
+          _MenuList(
+            canDelete: canDelete,
+            canEdit: canEdit,
+            canPin: canPin,
+            isPinned: isPinned,
+          ),
         ],
       ),
     );
@@ -122,8 +139,16 @@ class _ReactionBar extends StatelessWidget {
 
 class _MenuList extends StatelessWidget {
   final bool canDelete;
+  final bool canEdit;
+  final bool canPin;
+  final bool isPinned;
 
-  const _MenuList({required this.canDelete});
+  const _MenuList({
+    required this.canDelete,
+    required this.canEdit,
+    required this.canPin,
+    required this.isPinned,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -143,6 +168,13 @@ class _MenuList extends StatelessWidget {
               onTap: () => Navigator.of(context)
                   .pop(const MessageMenuResult.action(MessageMenuAction.reply)),
             ),
+            if (canEdit)
+              _MenuItem(
+                icon: Icons.edit_outlined,
+                label: 'Edit',
+                onTap: () => Navigator.of(context)
+                    .pop(const MessageMenuResult.action(MessageMenuAction.edit)),
+              ),
             _MenuItem(
               icon: Icons.copy,
               label: 'Copy',
@@ -155,6 +187,15 @@ class _MenuList extends StatelessWidget {
               onTap: () => Navigator.of(context).pop(
                   const MessageMenuResult.action(MessageMenuAction.forward)),
             ),
+            if (canPin)
+              _MenuItem(
+                icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                label: isPinned ? 'Unpin' : 'Pin',
+                onTap: () => Navigator.of(context).pop(MessageMenuResult.action(
+                    isPinned
+                        ? MessageMenuAction.unpin
+                        : MessageMenuAction.pin)),
+              ),
             if (canDelete)
               _MenuItem(
                 icon: Icons.delete_outline,
