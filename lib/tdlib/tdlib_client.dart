@@ -35,6 +35,7 @@ class TDLibClient {
     required int chatId,
     required String text,
     int? replyToMessageId,
+    List<Map<String, dynamic>>? entities,
   }) async {
     final jsonMap = {
       "@type": "sendMessage",
@@ -49,6 +50,7 @@ class TDLibClient {
         "text": {
           "@type": "formattedText",
           "text": text,
+          if (entities != null) "entities": entities,
         },
       },
     };
@@ -56,6 +58,54 @@ class TDLibClient {
     await _channel.invokeMethod('send', {
       'json': jsonEncode(jsonMap)
     });
+  }
+
+  /// Parses [text] as Telegram MarkdownV2 into a `formattedText`.
+  ///
+  /// Returns the resulting `{text, entities}` map, or `null` if the markdown is
+  /// malformed (TDLib reports an error). Callers should fall back to sending the
+  /// raw text so a message is never dropped.
+  static Future<Map<String, dynamic>?> parseTextEntities({
+    required String text,
+  }) async {
+    final jsonMap = {
+      "@type": "parseTextEntities",
+      "text": text,
+      "parseMode": {"@type": "textParseModeMarkdown", "version": 2},
+    };
+    final dynamic result;
+    try {
+      result = await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+    } catch (_) {
+      return null;
+    }
+    if (result["data"] == null) return null;
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    if (data["@type"] == "error") return null;
+    // The bridge returns `@type` values in PascalCase, but outgoing requests
+    // must use TDLib's lowercase-first names, so normalize before the entities
+    // are sent back inside a `formattedText`.
+    return _toRequestJson(data) as Map<String, dynamic>;
+  }
+
+  /// Recursively lowercases the first letter of every `@type` so a value
+  /// decoded from a bridge response can be sent back as a valid TDLib request.
+  static dynamic _toRequestJson(dynamic value) {
+    if (value is Map) {
+      return <String, dynamic>{
+        for (final entry in value.entries)
+          entry.key: entry.key == '@type' && entry.value is String
+              ? (entry.value as String).isEmpty
+                  ? entry.value
+                  : (entry.value as String)[0].toLowerCase() +
+                      (entry.value as String).substring(1)
+              : _toRequestJson(entry.value),
+      };
+    }
+    if (value is List) return value.map(_toRequestJson).toList();
+    return value;
   }
 
   /// Edits the text of a previously sent message.
@@ -66,6 +116,7 @@ class TDLibClient {
     required int chatId,
     required int messageId,
     required String text,
+    List<Map<String, dynamic>>? entities,
   }) async {
     final jsonMap = {
       "@type": "editMessageText",
@@ -76,6 +127,7 @@ class TDLibClient {
         "text": {
           "@type": "formattedText",
           "text": text,
+          if (entities != null) "entities": entities,
         },
       },
     };
@@ -331,6 +383,71 @@ class TDLibClient {
         ? jsonDecode(result["data"]) as Map<String, dynamic>
         : result["data"] as Map<String, dynamic>;
     return Map<String, dynamic>.from(data);
+  }
+
+  /// Fetches the current user (the logged-in account).
+  static Future<Map<String, dynamic>?> getMe() async {
+    final result = await _channel.invokeMethod('send', {
+      'json': '{"@type":"getMe"}',
+    });
+
+    if (result["data"] == null) return null;
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    return Map<String, dynamic>.from(data);
+  }
+
+  /// Creates (or returns) the private chat with [userId].
+  ///
+  /// Used for "Saved Messages" by passing the current user's own id.
+  static Future<Map<String, dynamic>?> createPrivateChat({
+    required int userId,
+    bool force = false,
+  }) async {
+    final jsonMap = {
+      "@type": "createPrivateChat",
+      "userId": userId,
+      "force": force,
+    };
+
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode(jsonMap),
+    });
+
+    if (result["data"] == null) return null;
+    final data = result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+    return Map<String, dynamic>.from(data);
+  }
+
+  /// Updates the current user's first and last name.
+  static Future<void> setName({
+    required String firstName,
+    String lastName = '',
+  }) async {
+    final jsonMap = {
+      "@type": "setName",
+      "firstName": firstName,
+      "lastName": lastName,
+    };
+
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+  }
+
+  /// Updates the current user's bio (about) text.
+  static Future<void> setBio({required String bio}) async {
+    final jsonMap = {"@type": "setBio", "bio": bio};
+
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
+  }
+
+  /// Updates the current user's editable username.
+  static Future<void> setUsername({required String username}) async {
+    final jsonMap = {"@type": "setUsername", "username": username};
+
+    await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
   }
 
   /// Logs the current user out, returning the app to the auth flow.

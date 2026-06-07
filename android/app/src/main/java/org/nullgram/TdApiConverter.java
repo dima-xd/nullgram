@@ -7,6 +7,7 @@ import org.json.JSONException;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.Iterator;
 import android.util.Base64;
 
@@ -25,6 +26,10 @@ public class TdApiConverter {
 
             try {
                 Field field = clazz.getField(key);
+                // Ignore static/final fields like `CONSTRUCTOR` that can appear
+                // in round-tripped JSON; they can't (and shouldn't) be set.
+                if (Modifier.isStatic(field.getModifiers())
+                        || Modifier.isFinal(field.getModifiers())) continue;
                 Object value = obj.get(key);
 
                 if (value instanceof JSONObject) {
@@ -47,7 +52,8 @@ public class TdApiConverter {
                     field.set(instance, value);
                 }
             } catch (Exception e) {
-                throw new Exception("Error processing field: " + key, e);
+                throw new Exception(
+                        "Error processing field: " + key + " (" + e + ")", e);
             }
         }
 
@@ -67,6 +73,10 @@ public class TdApiConverter {
 
             try {
                 Field field = clazz.getField(key);
+                // Ignore static/final fields like `CONSTRUCTOR` that can appear
+                // in round-tripped JSON; they can't (and shouldn't) be set.
+                if (Modifier.isStatic(field.getModifiers())
+                        || Modifier.isFinal(field.getModifiers())) continue;
                 Object value = obj.get(key);
 
                 if (value instanceof JSONObject) {
@@ -89,7 +99,8 @@ public class TdApiConverter {
                     field.set(instance, value);
                 }
             } catch (Exception e) {
-                throw new Exception("Error processing field: " + key, e);
+                throw new Exception(
+                        "Error processing field: " + key + " (" + e + ")", e);
             }
         }
 
@@ -129,6 +140,11 @@ public class TdApiConverter {
 
         Field[] fields = object.getClass().getFields();
         for (Field field : fields) {
+            // Skip static fields such as TdApi's `CONSTRUCTOR`; they are not
+            // data and cannot be set back when the JSON is re-parsed into a
+            // request (the field is final), which would fail deserialization.
+            if (Modifier.isStatic(field.getModifiers())) continue;
+
             Object value = field.get(object);
             if (value == null) continue;
 

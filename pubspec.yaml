@@ -28,6 +28,7 @@ dependencies:
   image_picker: ^1.2.2
   file_picker: ^11.0.2
   ntgcalls_flutter: ^1.0.0
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

@@ -793,8 +793,17 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> stopVideoRecording() async {}
 
   Future<void> _sendMessage() async {
-    final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    final raw = _messageController.text.trim();
+    if (raw.isEmpty) return;
+
+    // Parse MarkdownV2 into entities server-side; on a malformed-markdown error
+    // fall back to the raw text so the message is never dropped.
+    final parsed = await TDLibClient.parseTextEntities(text: raw);
+    if (!mounted) return;
+    final text = parsed?['text'] as String? ?? raw;
+    final entities = (parsed?['entities'] as List?)
+        ?.map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
 
     final editing = _editing.value;
     if (editing != null) {
@@ -804,6 +813,7 @@ class _ChatPageState extends State<ChatPage> {
         chatId: widget.chat['id'],
         messageId: editing['id'] as int,
         text: text,
+        entities: entities,
       );
       return;
     }
@@ -815,7 +825,62 @@ class _ChatPageState extends State<ChatPage> {
       chatId: widget.chat['id'],
       text: text,
       replyToMessageId: replyToMessageId,
+      entities: entities,
     );
+  }
+
+  /// Wraps the current selection with [left]/[right] markers and keeps the
+  /// inner text selected, so repeated formatting nests predictably.
+  void _wrapSelection(String left, String right) {
+    final selection = _messageController.selection;
+    final text = _messageController.text;
+    if (!selection.isValid || selection.isCollapsed) return;
+
+    final selected = selection.textInside(text);
+    _messageController.value = TextEditingValue(
+      text: selection.textBefore(text) +
+          left +
+          selected +
+          right +
+          selection.textAfter(text),
+      selection: TextSelection(
+        baseOffset: selection.start + left.length,
+        extentOffset: selection.start + left.length + selected.length,
+      ),
+    );
+    _messageFocusNode.requestFocus();
+  }
+
+  Future<void> _insertLink() async {
+    final selection = _messageController.selection;
+    if (!selection.isValid || selection.isCollapsed) return;
+
+    final controller = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Add link'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(hintText: 'https://example.com'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (url == null || url.isEmpty) return;
+    _wrapSelection('[', ']($url)');
   }
 
   /// Shows the attach options (photo / video / document) and sends the picked
@@ -906,6 +971,53 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// Builds the composer's text-selection menu: a single compact, horizontally
+  /// scrolling bar (Telegram-style) with copy/paste plus formatting actions
+  /// that wrap the selection with MarkdownV2 markers.
+  ///
+  /// A custom bar is used instead of [AdaptiveTextSelectionToolbar] because the
+  /// platform toolbar overflows its many items into a vertical menu that can
+  /// exceed the screen height and crash during layout.
+  Widget _composerContextMenu(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    final selection = _messageController.selection;
+    final hasSelection = selection.isValid && !selection.isCollapsed;
+
+    void act(VoidCallback apply) {
+      editableTextState.hideToolbar();
+      apply();
+    }
+
+    final items = <_SelectionAction>[
+      if (hasSelection)
+        _SelectionAction('Copy', () {
+          act(() =>
+              editableTextState.copySelection(SelectionChangedCause.toolbar));
+        }),
+      _SelectionAction('Paste', () {
+        act(() =>
+            editableTextState.pasteText(SelectionChangedCause.toolbar));
+      }),
+      if (hasSelection) ...[
+        _SelectionAction('Bold', () => act(() => _wrapSelection('*', '*'))),
+        _SelectionAction('Italic', () => act(() => _wrapSelection('_', '_'))),
+        _SelectionAction(
+            'Underline', () => act(() => _wrapSelection('__', '__'))),
+        _SelectionAction('Strike', () => act(() => _wrapSelection('~', '~'))),
+        _SelectionAction('Mono', () => act(() => _wrapSelection('`', '`'))),
+        _SelectionAction('Link', () => act(_insertLink)),
+      ],
+    ];
+
+    return _SelectionFormatBar(
+      anchor: editableTextState.contextMenuAnchors.primaryAnchor,
+      topInset: MediaQuery.of(context).padding.top,
+      items: items,
+    );
+  }
+
   Widget _buildMessageInput() {
     final canSendBasicMessages = widget.chat['permissions']?['canSendBasicMessages'] ?? true;
 
@@ -954,6 +1066,7 @@ class _ChatPageState extends State<ChatPage> {
                       focusNode: _messageFocusNode,
                       maxLines: null,
                       textCapitalization: TextCapitalization.sentences,
+                      contextMenuBuilder: _composerContextMenu,
                       decoration: const InputDecoration(
                         hintText: 'Write a message...',
                         border: InputBorder.none,
@@ -1558,5 +1671,68 @@ class _ChatPageState extends State<ChatPage> {
         ],
       ),
     ));
+  }
+}
+
+/// A labelled action in the composer's selection bar.
+class _SelectionAction {
+  final String label;
+  final VoidCallback onPressed;
+
+  const _SelectionAction(this.label, this.onPressed);
+}
+
+/// A compact selection toolbar anchored just above the text selection, with its
+/// actions in a single horizontally scrolling row so it never overflows.
+class _SelectionFormatBar extends StatelessWidget {
+  final Offset anchor;
+  final double topInset;
+  final List<_SelectionAction> items;
+
+  const _SelectionFormatBar({
+    required this.anchor,
+    required this.topInset,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final top =
+        (anchor.dy - 54).clamp(topInset + 8, MediaQuery.of(context).size.height);
+
+    return Stack(
+      children: [
+        Positioned(
+          left: 8,
+          right: 8,
+          top: top,
+          child: Center(
+            child: Material(
+              elevation: 2,
+              borderRadius: BorderRadius.circular(8),
+              color: theme.colorScheme.surfaceContainerHighest,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final item in items)
+                      TextButton(
+                        onPressed: item.onPressed,
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          foregroundColor: theme.colorScheme.onSurface,
+                        ),
+                        child: Text(item.label),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
