@@ -11,6 +11,7 @@ class MessagePhoto extends StatefulWidget {
   final Map<String, dynamic> content;
   final int messageId;
   final List<String>? albumPaths;
+  final List<String?>? albumCaptions;
   final int? albumIndex;
 
   const MessagePhoto({
@@ -18,6 +19,7 @@ class MessagePhoto extends StatefulWidget {
     required this.content,
     required this.messageId,
     this.albumPaths,
+    this.albumCaptions,
     this.albumIndex,
   });
 
@@ -36,17 +38,38 @@ class _MessagePhotoState extends State<MessagePhoto> {
     _fileUpdateSubscription = TDLibClient.filesUpdates.listen((update) {
       if (update['@type'] == updateFileConst) {
         final file = update['file'];
-        final fileId = file['id'];
-        final currentFileId = _getPhotoFileId();
-
-        if (fileId == currentFileId) {
-          if (mounted) {
-            widget.content['photo']['sizes'].last['photo'] = file;
-            setState(() {});
-          }
+        if (file['id'] == _getPhotoFileId()) {
+          _applyFile(file);
         }
       }
     });
+
+    _reconcileFileState();
+  }
+
+  /// Patches the latest [file] state onto the photo and rebuilds.
+  void _applyFile(dynamic file) {
+    if (!mounted) return;
+    widget.content['photo']['sizes'].last['photo'] = file;
+    setState(() {});
+  }
+
+  /// Re-reads TDLib's authoritative file state when the cached content shows no
+  /// usable path.
+  ///
+  /// The download-completion `updateFile` push is a transient event; a photo
+  /// that finished downloading while scrolled off-screen (its widget disposed)
+  /// would otherwise stay stuck on its preview. Querying on mount recovers it.
+  Future<void> _reconcileFileState() async {
+    if (_getPhotoPath() != null) return;
+    final fileId = _getPhotoFileId();
+    if (fileId == null) return;
+
+    final file = await TDLibClient.getFile(fileId: fileId);
+    if (file == null) return;
+    if (file['local']?['isDownloadingCompleted'] == true) {
+      _applyFile(file);
+    }
   }
 
   @override
@@ -80,6 +103,12 @@ class _MessagePhotoState extends State<MessagePhoto> {
     if (data is List) {
       return data.cast<int>();
     }
+    return null;
+  }
+
+  String? _getCaption() {
+    final text = widget.content['caption']?['text'];
+    if (text is String && text.isNotEmpty) return text;
     return null;
   }
 
@@ -152,6 +181,7 @@ class _MessagePhotoState extends State<MessagePhoto> {
             MaterialPageRoute(
               builder: (context) => ImageDetails(
                 photoPaths: widget.albumPaths ?? [photoPath],
+                captions: widget.albumCaptions ?? [_getCaption()],
                 initialIndex: widget.albumIndex ?? 0,
                 heroTag: heroTag,
               ),

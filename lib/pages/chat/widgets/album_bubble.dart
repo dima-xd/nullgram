@@ -32,12 +32,28 @@ class AlbumBubble extends StatefulWidget {
 
 class _AlbumBubbleState extends State<AlbumBubble> {
   List<String> _getAlbumPhotoPaths() {
-    return widget.albumMessages
-        .where((msg) => msg['content']['@type'] == 'MessagePhoto')
-        .map((msg) => msg['content']['photo']['sizes'].last['photo']['local']['path'] as String)
+    return _photoMessages()
+        .map((msg) => msg['content']['photo']['sizes'].last['photo']['local']
+            ['path'] as String)
         .where((path) => path.isNotEmpty)
         .toList();
   }
+
+  /// Captions aligned 1:1 with [_getAlbumPhotoPaths]; null when absent.
+  List<String?> _getAlbumCaptions() {
+    return _photoMessages()
+        .where((msg) =>
+            (msg['content']['photo']['sizes'].last['photo']['local']['path']
+                    as String)
+                .isNotEmpty)
+        .map((msg) {
+      final text = msg['content']['caption']?['text'];
+      return (text is String && text.isNotEmpty) ? text : null;
+    }).toList();
+  }
+
+  Iterable<Map<String, dynamic>> _photoMessages() => widget.albumMessages
+      .where((msg) => msg['content']['@type'] == 'MessagePhoto');
 
   Widget _buildMediaContent(Map<String, dynamic> content, int messageId, int albumIndex) {
     final contentType = content['@type'];
@@ -48,6 +64,7 @@ class _AlbumBubbleState extends State<AlbumBubble> {
           content: content,
           messageId: messageId,
           albumPaths: _getAlbumPhotoPaths(),
+          albumCaptions: _getAlbumCaptions(),
           albumIndex: albumIndex,
         );
       case 'MessageVideo':

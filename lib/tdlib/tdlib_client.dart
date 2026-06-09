@@ -672,6 +672,23 @@ class TDLibClient {
     });
   }
 
+  /// Returns TDLib's current, authoritative [File] state for [fileId].
+  ///
+  /// Unlike the one-shot `updateFile` pushes (which a widget only sees while it
+  /// is mounted and subscribed), this can be called at any time to recover the
+  /// real on-disk state. Used to reconcile media that finished downloading—or
+  /// was evicted from TDLib's cache—while the widget was off-screen.
+  static Future<Map<String, dynamic>?> getFile({required int fileId}) async {
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode({"@type": "getFile", "fileId": fileId}),
+    });
+
+    if (result["data"] == null) return null;
+    return result["data"] is String
+        ? jsonDecode(result["data"]) as Map<String, dynamic>
+        : result["data"] as Map<String, dynamic>;
+  }
+
   static Future<Messages?> getChatHistory({required int chatId, int fromMessageId = 0, required int offset, required int limit, required bool onlyLocal}) async {
     final jsonMap = {
       "@type": "getChatHistory",
