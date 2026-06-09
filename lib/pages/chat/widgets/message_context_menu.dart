@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:nullgram/theme/motion.dart';
 
 /// Actions offered by the message context menu.
 enum MessageMenuAction { reply, edit, copy, forward, pin, unpin, delete }
@@ -33,7 +35,8 @@ Future<MessageMenuResult?> showMessageContextMenu({
     context: context,
     barrierDismissible: true,
     barrierLabel: 'Message actions',
-    barrierColor: Colors.black54,
+    barrierColor:
+        Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
     transitionDuration: const Duration(milliseconds: 150),
     pageBuilder: (context, animation, secondaryAnimation) => _MessageMenu(
       availableReactions: availableReactions,
@@ -117,7 +120,7 @@ class _ReactionBar extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (final emoji in emojis)
+                  for (final (index, emoji) in emojis.indexed)
                     InkWell(
                       borderRadius: BorderRadius.circular(24),
                       onTap: () => Navigator.of(context)
@@ -126,7 +129,20 @@ class _ReactionBar extends StatelessWidget {
                         padding: const EdgeInsets.all(6),
                         child: Text(emoji, style: const TextStyle(fontSize: 28)),
                       ),
-                    ),
+                    )
+                        .animate()
+                        .scale(
+                          delay: (index * 40).ms,
+                          duration: Motion.fast,
+                          curve: Motion.emphasized,
+                          begin: const Offset(0.6, 0.6),
+                          end: const Offset(1.0, 1.0),
+                        )
+                        .fadeIn(
+                          delay: (index * 40).ms,
+                          duration: Motion.fast,
+                          curve: Motion.standard,
+                        ),
                 ],
               ),
             ),
@@ -238,7 +254,10 @@ class _MenuItem extends StatelessWidget {
             const SizedBox(width: 16),
             Text(
               label,
-              style: TextStyle(fontSize: 16, color: foreground),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: foreground, fontWeight: FontWeight.normal),
             ),
           ],
         ),

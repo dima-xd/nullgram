@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/theme/app_theme.dart';
 
 /// A centered date pill shown between message groups of different days.
 class DateSeparator extends StatelessWidget {
@@ -14,16 +15,15 @@ class DateSeparator extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 10),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest.withValues(alpha: 0.92),
+          color: context.chatColors.dateSeparatorBg,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Text(
           label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: scheme.onSurfaceVariant,
-          ),
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurfaceVariant,
+              ),
         ),
       ),
     );

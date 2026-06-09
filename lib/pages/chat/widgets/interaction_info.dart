@@ -13,6 +13,12 @@ class InteractionInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final metaStyle = textTheme.labelSmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+
     final interactionInfo = message['interactionInfo'];
 
     final viewCount = interactionInfo?['viewCount'] as int?;
@@ -29,15 +35,12 @@ class InteractionInfo extends StatelessWidget {
             Icon(
               Icons.visibility_outlined,
               size: 14,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              color: scheme.onSurfaceVariant,
             ),
             const SizedBox(width: 4),
             Text(
               MessageFormatter.formatCount(viewCount),
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-              ),
+              style: metaStyle,
             ),
           ],
           if (forwardCount != null && forwardCount > 0) ...[
@@ -45,15 +48,12 @@ class InteractionInfo extends StatelessWidget {
             Icon(
               Icons.forward,
               size: 14,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+              color: scheme.onSurfaceVariant,
             ),
             const SizedBox(width: 4),
             Text(
               MessageFormatter.formatCount(forwardCount),
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-              ),
+              style: metaStyle,
             ),
           ],
           const SizedBox(width: 12),
@@ -64,32 +64,45 @@ class InteractionInfo extends StatelessWidget {
             if ((message['editDate'] as int? ?? 0) > 0) ...[
               Text(
                 'edited',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                  fontSize: 12,
-                  fontStyle: FontStyle.italic,
-                ),
+                style: metaStyle?.copyWith(fontStyle: FontStyle.italic),
               ),
               const SizedBox(width: 4),
             ],
             Text(
               MessageFormatter.formatTime(message['date']!),
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                fontSize: 12,
-              ),
+              style: metaStyle,
             ),
             if (isOutgoing) ...[
               const SizedBox(width: 4),
-              Icon(
-                Icons.done_all,
-                size: 16,
-                color: Theme.of(context).colorScheme.primary,
+              _DeliveryTick(
+                sendingState: message['sendingState']?['@type'] as String?,
+                scheme: scheme,
               ),
             ],
           ],
         ),
       ],
     );
+  }
+}
+
+/// The outgoing-message delivery indicator: a clock while pending, an error
+/// glyph on failure, otherwise the sent/read double-check.
+class _DeliveryTick extends StatelessWidget {
+  final String? sendingState;
+  final ColorScheme scheme;
+
+  const _DeliveryTick({required this.sendingState, required this.scheme});
+
+  @override
+  Widget build(BuildContext context) {
+    switch (sendingState) {
+      case 'MessageSendingStatePending':
+        return Icon(Icons.schedule, size: 14, color: scheme.onSurfaceVariant);
+      case 'MessageSendingStateFailed':
+        return Icon(Icons.error_outline, size: 16, color: scheme.error);
+      default:
+        return Icon(Icons.done_all, size: 16, color: scheme.primary);
+    }
   }
 }

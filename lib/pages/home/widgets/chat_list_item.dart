@@ -9,6 +9,11 @@ class ChatListItem extends StatelessWidget {
   final Map<String, Uint8List?> miniThumbnailCache;
   final Function(int) onTap;
 
+  /// When set, occurrences of this query within the title are emphasized.
+  ///
+  /// Defaults to null so non-search call sites render plain titles.
+  final String? highlightQuery;
+
   const ChatListItem({
     super.key,
     required this.chat,
@@ -16,6 +21,7 @@ class ChatListItem extends StatelessWidget {
     required this.fileExistsCache,
     required this.miniThumbnailCache,
     required this.onTap,
+    this.highlightQuery,
   });
 
   @override
@@ -67,20 +73,17 @@ class ChatListItem extends StatelessWidget {
                           ),
                         ),
                       Expanded(
-                        child: Text(
-                          title,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        child: _ChatTitle(
+                          title: title,
+                          unreadCount: unreadCount,
+                          highlightQuery: highlightQuery,
                         ),
                       ),
                       if (lastMessage != null)
                         Text(
                           _formatTime(lastMessage['date'] as int),
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurface.withOpacity(0.6),
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
                     ],
@@ -88,11 +91,19 @@ class ChatListItem extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
+                      if (_previewIcon(lastMessage) != null) ...[
+                        Icon(
+                          _previewIcon(lastMessage),
+                          size: 16,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       Expanded(
                         child: Text(
                           _getMessagePreview(lastMessage),
                           style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurface.withOpacity(0.7),
+                            color: theme.colorScheme.onSurfaceVariant,
                             fontWeight: unreadCount > 0 ? FontWeight.w500 : FontWeight.normal,
                           ),
                           maxLines: 1,
@@ -100,20 +111,10 @@ class ChatListItem extends StatelessWidget {
                         ),
                       ),
                       if (unreadCount > 0)
-                        Container(
-                          margin: const EdgeInsets.only(left: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            unreadCount > 999 ? '999+' : unreadCount.toString(),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onPrimary,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
-                            ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Badge(
+                            label: Text(unreadCount > 999 ? '999+' : '$unreadCount'),
                           ),
                         ),
                     ],
@@ -125,6 +126,26 @@ class ChatListItem extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// A leading icon describing the last message's type, or null for plain text.
+  IconData? _previewIcon(Map<String, dynamic>? lastMessage) {
+    switch (lastMessage?['content']?['@type'] as String?) {
+      case 'MessagePhoto':
+        return Icons.photo_outlined;
+      case 'MessageVideo':
+        return Icons.videocam_outlined;
+      case 'MessageVoiceNote':
+        return Icons.mic_none;
+      case 'MessageDocument':
+        return Icons.insert_drive_file_outlined;
+      case 'MessageSticker':
+        return Icons.emoji_emotions_outlined;
+      case 'MessageAnimation':
+        return Icons.gif_box_outlined;
+      default:
+        return null;
+    }
   }
 
   String _getMessagePreview(Map<String, dynamic>? lastMessage) {
@@ -139,17 +160,17 @@ class ChatListItem extends StatelessWidget {
       case 'MessageText':
         return content['text']?['text'] as String? ?? '';
       case 'MessagePhoto':
-        return '📷 Photo';
+        return 'Photo';
       case 'MessageVideo':
-        return '🎥 Video';
+        return 'Video';
       case 'MessageVoiceNote':
-        return '🎤 Voice message';
+        return 'Voice message';
       case 'MessageDocument':
-        return '📎 Document';
+        return 'Document';
       case 'MessageSticker':
-        return '🎨 Sticker';
+        return 'Sticker';
       case 'MessageAnimation':
-        return '🎬 GIF';
+        return 'GIF';
       default:
         return 'Message';
     }
@@ -167,5 +188,66 @@ class ChatListItem extends StatelessWidget {
     } else {
       return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year % 100}';
     }
+  }
+}
+
+/// Chat title that optionally emphasizes the substring matching a search query.
+class _ChatTitle extends StatelessWidget {
+  const _ChatTitle({
+    required this.title,
+    required this.unreadCount,
+    this.highlightQuery,
+  });
+
+  final String title;
+  final int unreadCount;
+  final String? highlightQuery;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final baseStyle = theme.textTheme.titleMedium?.copyWith(
+      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+    );
+
+    final query = highlightQuery?.trim() ?? '';
+    if (query.isEmpty) {
+      return Text(
+        title,
+        style: baseStyle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final start = title.toLowerCase().indexOf(query.toLowerCase());
+    if (start < 0) {
+      return Text(
+        title,
+        style: baseStyle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final end = start + query.length;
+    return Text.rich(
+      TextSpan(
+        style: baseStyle,
+        children: [
+          if (start > 0) TextSpan(text: title.substring(0, start)),
+          TextSpan(
+            text: title.substring(start, end),
+            style: TextStyle(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if (end < title.length) TextSpan(text: title.substring(end)),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 }

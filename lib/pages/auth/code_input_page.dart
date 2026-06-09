@@ -68,22 +68,17 @@ class _CodeInputPageState extends State<CodeInputPage> {
     try {
       final result = await TDLibClient.checkAuthenticationCode(code: code);
       if (result == 'PHONE_CODE_INVALID') {
+        await HapticFeedback.heavyImpact();
         _hasError.value = true;
         _codeController.clear();
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Invalid code'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        showAuthError(context, 'That code is invalid. Please try again.');
       }
-    } catch (e) {
+    } catch (_) {
+      await HapticFeedback.heavyImpact();
       _hasError.value = true;
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
+      showAuthError(context, 'Could not verify the code. Please try again.');
     } finally {
       _isLoading.value = false;
     }
@@ -94,14 +89,10 @@ class _CodeInputPageState extends State<CodeInputPage> {
       await TDLibClient.resendAuthenticationCode();
       _startResendCountdown(widget.timeout ?? 60);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Code sent again')),
-      );
-    } catch (e) {
+      showAuthInfo(context, 'Code sent again');
+    } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      showAuthError(context, 'Could not resend the code. Please try again.');
     }
   }
 
@@ -129,13 +120,17 @@ class _CodeInputPageState extends State<CodeInputPage> {
           const SizedBox(height: 16),
           _buildCodeField(theme),
           const SizedBox(height: 24),
-          ValueListenableBuilder<bool>(
-            valueListenable: _isLoading,
-            builder: (context, loading, _) => AuthPrimaryButton(
-              label: 'Verify',
-              loading: loading,
-              onPressed: _verifyCode,
-            ),
+          ListenableBuilder(
+            listenable: Listenable.merge([_isLoading, _codeController]),
+            builder: (context, _) {
+              final complete =
+                  _codeController.text.trim().length == _codeLength;
+              return AuthPrimaryButton(
+                label: 'Verify',
+                loading: _isLoading.value,
+                onPressed: complete ? _verifyCode : null,
+              );
+            },
           ),
           const SizedBox(height: 16),
           _buildResend(theme),
@@ -144,34 +139,21 @@ class _CodeInputPageState extends State<CodeInputPage> {
     );
   }
 
+  void _onCodeChanged(String value) {
+    if (_hasError.value) _hasError.value = false;
+    if (value.length == _codeLength) {
+      HapticFeedback.selectionClick();
+      _verifyCode();
+    }
+  }
+
   Widget _buildCodeField(ThemeData theme) => ValueListenableBuilder<bool>(
         valueListenable: _hasError,
-        builder: (context, error, _) => AuthInputContainer(
+        builder: (context, error, _) => _OtpField(
+          controller: _codeController,
+          length: _codeLength,
           hasError: error,
-          child: TextField(
-            controller: _codeController,
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            autofocus: true,
-            maxLength: _codeLength,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(_codeLength),
-            ],
-            style: theme.textTheme.headlineMedium?.copyWith(
-              letterSpacing: 8,
-              fontWeight: FontWeight.bold,
-              color: error ? theme.colorScheme.error : null,
-            ),
-            decoration: authInputDecoration(
-              hintText: '• • • • •',
-              counterText: '',
-            ),
-            onChanged: (value) {
-              if (_hasError.value) _hasError.value = false;
-              if (value.length == _codeLength) _verifyCode();
-            },
-          ),
+          onChanged: _onCodeChanged,
         ),
       );
 
@@ -180,7 +162,9 @@ class _CodeInputPageState extends State<CodeInputPage> {
         builder: (context, seconds, _) => seconds > 0
             ? Text(
                 'Resend code in ${seconds}s',
-                style: theme.textTheme.bodySmall,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
                 textAlign: TextAlign.center,
               )
             : TextButton(
@@ -188,4 +172,147 @@ class _CodeInputPageState extends State<CodeInputPage> {
                 child: const Text('Resend code'),
               ),
       );
+}
+
+/// Segmented one-time-code input rendering [length] cells backed by a single
+/// hidden [TextField].
+///
+/// The active cell is outlined in [ColorScheme.primary]; when [hasError] is
+/// set every cell is tinted with [ColorScheme.error]. All editing flows through
+/// [controller] and [onChanged], so auto-submit and error-clearing behave
+/// exactly like a plain text field.
+class _OtpField extends StatefulWidget {
+  const _OtpField({
+    required this.controller,
+    required this.length,
+    required this.hasError,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final int length;
+  final bool hasError;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_OtpField> createState() => _OtpFieldState();
+}
+
+class _OtpFieldState extends State<_OtpField> {
+  final _focusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // Visual cells. They react to controller and focus changes.
+        AnimatedBuilder(
+          animation: Listenable.merge([widget.controller, _focusNode]),
+          builder: (context, _) => _OtpCells(
+            value: widget.controller.text,
+            length: widget.length,
+            hasError: widget.hasError,
+            hasFocus: _focusNode.hasFocus,
+          ),
+        ),
+        // Hidden input that owns the editing logic; tapping the cells focuses
+        // it and opens the keyboard.
+        Positioned.fill(
+          child: Opacity(
+            opacity: 0,
+            child: TextField(
+              controller: widget.controller,
+              focusNode: _focusNode,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              showCursor: false,
+              enableInteractiveSelection: false,
+              maxLength: widget.length,
+              style: theme.textTheme.headlineMedium,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(widget.length),
+              ],
+              decoration: const InputDecoration(
+                counterText: '',
+                border: InputBorder.none,
+              ),
+              onChanged: widget.onChanged,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The row of digit boxes drawn for the [_OtpField].
+class _OtpCells extends StatelessWidget {
+  const _OtpCells({
+    required this.value,
+    required this.length,
+    required this.hasError,
+    required this.hasFocus,
+  });
+
+  final String value;
+  final int length;
+  final bool hasError;
+  final bool hasFocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final activeIndex = value.length.clamp(0, length - 1);
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(length, (index) {
+        final filled = index < value.length;
+        final isActive = hasFocus && index == activeIndex && !hasError;
+        final Color borderColor;
+        if (hasError) {
+          borderColor = scheme.error;
+        } else if (isActive) {
+          borderColor = scheme.primary;
+        } else {
+          borderColor = scheme.outlineVariant;
+        }
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 48,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: borderColor,
+                width: isActive || hasError ? 2 : 1,
+              ),
+            ),
+            child: Text(
+              filled ? value[index] : '',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                color: hasError ? scheme.error : scheme.onSurface,
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
 }

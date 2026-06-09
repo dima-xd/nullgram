@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/theme/app_theme.dart';
 import 'message_audio.dart';
 import 'message_photo.dart';
 import 'message_reactions.dart';
@@ -163,8 +164,8 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                 child: Container(
                   decoration: BoxDecoration(
                     color: isOutgoing
-                        ? Theme.of(context).colorScheme.primaryContainer
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                        ? context.chatColors.outgoingBubble
+                        : context.chatColors.incomingBubble,
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
@@ -175,11 +176,14 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                           child: Text(
                             senderName,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelLarge
+                                ?.copyWith(
+                                  color:
+                                      Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
                         ),
                       buildGrid(),
@@ -232,8 +236,8 @@ class _AlbumBubbleState extends State<AlbumBubble> {
             Container(
               decoration: BoxDecoration(
                 color: isOutgoing
-                    ? Theme.of(context).colorScheme.primaryContainer
-                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                    ? context.chatColors.outgoingBubble
+                    : context.chatColors.incomingBubble,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Column(
@@ -244,11 +248,13 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                       child: Text(
                         senderName,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .labelLarge
+                            ?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
                       ),
                     ),
                   buildGrid(),

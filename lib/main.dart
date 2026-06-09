@@ -1,7 +1,9 @@
 import 'dart:ui';
 
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
+import 'package:nullgram/theme/app_theme.dart';
 import 'package:nullgram/pages/auth/code_input_page.dart';
 import 'package:nullgram/pages/auth/login_page.dart';
 import 'package:nullgram/pages/auth/password_input_page.dart';
@@ -20,6 +22,10 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 /// the system setting.
 final ValueNotifier<ThemeMode> themeModeNotifier =
     ValueNotifier(ThemeMode.system);
+
+/// Whether the dark theme collapses surfaces to true black (OLED). Toggled from
+/// settings; only affects the dark theme.
+final ValueNotifier<bool> amoledNotifier = ValueNotifier(false);
 
 String? _currentAuthState;
 
@@ -147,40 +153,40 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeModeNotifier,
-      builder: (context, themeMode, child) {
-        return MaterialApp(
-          navigatorKey: navigatorKey,
-          builder: (context, child) => CallOverlay(child: child!),
-          debugShowCheckedModeBanner: false,
-          themeMode: themeMode,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-            useMaterial3: true,
-          ),
-          darkTheme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.blue,
-              brightness: Brightness.dark,
-            ),
-            useMaterial3: true,
-          ),
-          home: FutureBuilder<bool>(
-            future: _authorized,
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
+    return DynamicColorBuilder(
+      builder: (lightDynamic, darkDynamic) {
+        return ValueListenableBuilder<ThemeMode>(
+          valueListenable: themeModeNotifier,
+          builder: (context, themeMode, _) {
+            return ValueListenableBuilder<bool>(
+              valueListenable: amoledNotifier,
+              builder: (context, amoled, _) {
+                return MaterialApp(
+                  navigatorKey: navigatorKey,
+                  builder: (context, child) => CallOverlay(child: child!),
+                  debugShowCheckedModeBanner: false,
+                  themeMode: themeMode,
+                  theme: buildLightTheme(lightDynamic),
+                  darkTheme: buildDarkTheme(darkDynamic, amoled: amoled),
+                  home: FutureBuilder<bool>(
+                    future: _authorized,
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Scaffold(
+                          body: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      return snapshot.data!
+                          ? const HomePage()
+                          : const Scaffold(
+                              body: Center(child: CircularProgressIndicator()),
+                            );
+                    },
+                  ),
                 );
-              }
-              return snapshot.data!
-                  ? const HomePage()
-                  : const Scaffold(
-                      body: Center(child: CircularProgressIndicator()),
-                    );
-            },
-          ),
+              },
+            );
+          },
         );
       },
     );

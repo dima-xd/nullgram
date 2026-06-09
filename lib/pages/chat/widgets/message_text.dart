@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:nullgram/theme/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Renders a TDLib `formattedText` map (`{text, entities}`) with its rich-text
@@ -39,10 +40,8 @@ class _MessageTextState extends State<MessageText> {
     if (text.isEmpty) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
-    final baseStyle = TextStyle(
-      color: theme.colorScheme.onSurface,
-      fontSize: 15,
-    );
+    final baseStyle = (theme.textTheme.bodyLarge ?? const TextStyle())
+        .copyWith(color: theme.colorScheme.onSurface);
 
     final entities = widget.content['entities'] as List? ?? const [];
     if (entities.isEmpty) {
@@ -54,8 +53,8 @@ class _MessageTextState extends State<MessageText> {
       text: text,
       entities: entities,
       baseStyle: baseStyle,
-      linkColor: theme.colorScheme.primary,
-      codeBackground: theme.colorScheme.onSurface.withOpacity(0.08),
+      linkColor: context.chatColors.bubbleLink,
+      codeBackground: context.chatColors.codeBackground,
     );
     return Text.rich(TextSpan(children: spans));
   }

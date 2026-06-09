@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/theme/motion.dart';
 
 /// A sticker message.
 ///
@@ -88,6 +89,7 @@ class _MessageStickerState extends State<MessageSticker> {
     final emoji = _sticker['emoji'] as String?;
 
     final Widget placeholder = SizedBox(
+      key: const ValueKey('sticker-placeholder'),
       width: _maxSize,
       height: _maxSize,
       child: Center(
@@ -95,17 +97,27 @@ class _MessageStickerState extends State<MessageSticker> {
       ),
     );
 
-    if (path == null || path.isEmpty) return placeholder;
+    final Widget child = (path == null || path.isEmpty)
+        ? placeholder
+        : SizedBox(
+            key: ValueKey('sticker-$path'),
+            width: width * scale,
+            height: height * scale,
+            child: Image.file(
+              File(path),
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stackTrace) => placeholder,
+            ),
+          );
 
-    return SizedBox(
-      width: width * scale,
-      height: height * scale,
-      child: Image.file(
-        File(path),
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-        errorBuilder: (context, error, stackTrace) => placeholder,
-      ),
+    // Ease the sticker in once its file finishes downloading/decoding
+    // instead of popping over the emoji/thumbnail placeholder.
+    return AnimatedSwitcher(
+      duration: Motion.medium,
+      switchInCurve: Motion.standard,
+      switchOutCurve: Motion.standard,
+      child: child,
     );
   }
 }

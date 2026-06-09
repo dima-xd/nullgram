@@ -60,94 +60,111 @@ class _HomeMenuState extends State<HomeMenu> {
     );
   }
 
+  /// Items not yet wired to a backend flow: tell the user instead of silently
+  /// closing the drawer (a dead-end tap).
+  void _comingSoon(String label) {
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label — coming soon')),
+    );
+  }
+
+  void _openSettings() {
+    Navigator.pop(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const SettingsPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Drawer(
-      child: ListView(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewPadding.bottom,
-        ),
-        children: [
-          ValueListenableBuilder<Map<String, dynamic>?>(
-            valueListenable: _me,
-            builder: (context, me, child) {
-              return InkWell(
-                onTap: me == null ? null : _openMyProfile,
-                child: DrawerHeader(
-                  decoration: BoxDecoration(color: theme.colorScheme.primary),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (me == null)
-                        const CircleAvatar(
-                          radius: 32,
-                          backgroundColor: Colors.white,
-                          child: Icon(Icons.person, size: 32),
-                        )
-                      else
-                        ChatAvatar(chat: _avatarChat(me), radius: 32),
-                      const SizedBox(height: 8),
-                      Text(
-                        me == null ? 'Nullgram' : _fullName(me),
-                        style: TextStyle(
-                          color: theme.colorScheme.onPrimary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+      child: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            ValueListenableBuilder<Map<String, dynamic>?>(
+              valueListenable: _me,
+              builder: (context, me, child) {
+                return InkWell(
+                  onTap: me == null ? null : _openMyProfile,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (me == null)
+                          CircleAvatar(
+                            radius: 32,
+                            backgroundColor:
+                                theme.colorScheme.surfaceContainerHighest,
+                            child: Icon(Icons.person,
+                                size: 32,
+                                color: theme.colorScheme.onSurfaceVariant),
+                          )
+                        else
+                          ChatAvatar(chat: _avatarChat(me), radius: 32),
+                        const SizedBox(height: 12),
+                        Text(
+                          me == null ? 'Nullgram' : _fullName(me),
+                          style: theme.textTheme.titleLarge,
                         ),
-                      ),
-                    ],
+                        if (me?['phoneNumber'] != null)
+                          Text(
+                            '+${me!['phoneNumber']}',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
-          ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: const Text('My Profile'),
-            onTap: _openMyProfile,
-          ),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.group),
-            title: const Text('New Group'),
-            onTap: () => Navigator.pop(context),
-          ),
-          ListTile(
-            leading: const Icon(Icons.group),
-            title: const Text('New Channel'),
-            onTap: () => Navigator.pop(context),
-          ),
-          ListTile(
-            leading: const Icon(Icons.person_add),
-            title: const Text('Contacts'),
-            onTap: () => Navigator.pop(context),
-          ),
-          ListTile(
-            leading: const Icon(Icons.phone),
-            title: const Text('Calls'),
-            onTap: () => Navigator.pop(context),
-          ),
-          ListTile(
-            leading: const Icon(Icons.bookmark),
-            title: const Text('Saved Messages'),
-            onTap: _openSavedMessages,
-          ),
-          ListTile(
-            leading: const Icon(Icons.settings),
-            title: const Text('Settings'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const SettingsPage()),
-              );
-            },
-          ),
-        ],
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('My Profile'),
+              onTap: _openMyProfile,
+            ),
+            ListTile(
+              leading: const Icon(Icons.bookmark_outline),
+              title: const Text('Saved Messages'),
+              onTap: _openSavedMessages,
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.group_outlined),
+              title: const Text('New Group'),
+              onTap: () => _comingSoon('New Group'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.campaign_outlined),
+              title: const Text('New Channel'),
+              onTap: () => _comingSoon('New Channel'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.contacts_outlined),
+              title: const Text('Contacts'),
+              onTap: () => _comingSoon('Contacts'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.phone_outlined),
+              title: const Text('Calls'),
+              onTap: () => _comingSoon('Calls'),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Settings'),
+              onTap: _openSettings,
+            ),
+          ],
+        ),
       ),
     );
   }

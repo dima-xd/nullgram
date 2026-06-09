@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:nullgram/theme/motion.dart';
 import '../utils/message_formatter.dart';
 
 /// The row of reaction chips shown beneath a message bubble.
@@ -22,25 +24,20 @@ class MessageReactions extends StatelessWidget {
   Widget build(BuildContext context) {
     if (reactions.isEmpty) return const SizedBox.shrink();
 
-    return AnimatedScale(
-      scale: 1,
-      duration: const Duration(milliseconds: 150),
-      curve: Curves.easeOut,
-      child: Wrap(
-        spacing: 4,
-        runSpacing: 4,
-        alignment: isOutgoing ? WrapAlignment.end : WrapAlignment.start,
-        children: [
-          for (final reaction in reactions)
-            if (reaction['type']?['@type'] == 'ReactionTypeEmoji')
-              _ReactionChip(
-                emoji: reaction['type']['emoji'] as String,
-                count: reaction['totalCount'] as int? ?? 0,
-                isChosen: reaction['isChosen'] == true,
-                onTap: onTap,
-              ),
-        ],
-      ),
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      alignment: isOutgoing ? WrapAlignment.end : WrapAlignment.start,
+      children: [
+        for (final reaction in reactions)
+          if (reaction['type']?['@type'] == 'ReactionTypeEmoji')
+            _ReactionChip(
+              emoji: reaction['type']['emoji'] as String,
+              count: reaction['totalCount'] as int? ?? 0,
+              isChosen: reaction['isChosen'] == true,
+              onTap: onTap,
+            ),
+      ],
     );
   }
 }
@@ -64,14 +61,25 @@ class _ReactionChip extends StatelessWidget {
     final background =
         isChosen ? scheme.primary : scheme.surfaceContainerHighest;
     final foreground = isChosen ? scheme.onPrimary : scheme.onSurface;
+    final radius = BorderRadius.circular(14);
 
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(14),
+    final countStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: foreground,
+        );
+
+    final chip = Material(
+      type: MaterialType.transparency,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: radius,
         onTap: () => onTap(emoji),
-        child: Padding(
+        child: AnimatedContainer(
+          duration: Motion.fast,
+          curve: Motion.standard,
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: radius,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -79,13 +87,11 @@ class _ReactionChip extends StatelessWidget {
               Text(emoji, style: const TextStyle(fontSize: 14)),
               if (count > 0) ...[
                 const SizedBox(width: 4),
-                Text(
-                  MessageFormatter.formatCount(count),
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: foreground,
-                  ),
+                AnimatedDefaultTextStyle(
+                  duration: Motion.fast,
+                  curve: Motion.standard,
+                  style: countStyle ?? const TextStyle(),
+                  child: Text(MessageFormatter.formatCount(count)),
                 ),
               ],
             ],
@@ -93,5 +99,23 @@ class _ReactionChip extends StatelessWidget {
         ),
       ),
     );
+
+    if (!isChosen) return chip;
+
+    return chip
+        .animate(key: ValueKey(isChosen))
+        .scaleXY(
+          begin: 1,
+          end: 1.12,
+          duration: Motion.fast,
+          curve: Motion.emphasized,
+        )
+        .then()
+        .scaleXY(
+          begin: 1.12,
+          end: 1,
+          duration: Motion.fast,
+          curve: Motion.standard,
+        );
   }
 }

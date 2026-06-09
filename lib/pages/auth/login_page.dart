@@ -73,11 +73,9 @@ class _LoginPageState extends State<LoginPage> {
       await TDLibClient.setAuthenticationPhoneNumber(
         phoneNumber: '${_country.value.dialCode}$digits',
       );
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      showAuthError(context, 'Could not send the code. Please try again.');
     } finally {
       _isLoading.value = false;
     }
@@ -92,7 +90,8 @@ class _LoginPageState extends State<LoginPage> {
   void _switchToPhone() => _mode.value = AuthMode.phone;
 
   Future<void> _pickCountry() async {
-    final selected = await showCountryPicker(context);
+    final selected =
+        await showCountryPicker(context, selected: _country.value);
     if (selected != null) _country.value = selected;
   }
 
@@ -103,15 +102,12 @@ class _LoginPageState extends State<LoginPage> {
     return ValueListenableBuilder<AuthMode>(
       valueListenable: _mode,
       builder: (context, mode, _) => Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
         appBar: mode == AuthMode.qr
             ? AppBar(
                 backgroundColor: Colors.transparent,
                 elevation: 0,
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: _switchToPhone,
-                ),
+                scrolledUnderElevation: 0,
+                leading: BackButton(onPressed: _switchToPhone),
               )
             : null,
         body: SafeArea(
@@ -147,14 +143,18 @@ class _LoginPageState extends State<LoginPage> {
           const SizedBox(height: 32),
           _buildPhoneInput(theme),
           const SizedBox(height: 24),
-          ValueListenableBuilder<bool>(
-            valueListenable: _isLoading,
-            builder: (context, loading, _) => AuthPrimaryButton(
-              label: 'Continue',
-              icon: Icons.arrow_forward,
-              loading: loading,
-              onPressed: _sendCode,
-            ),
+          ListenableBuilder(
+            listenable: Listenable.merge([_isLoading, _phoneController]),
+            builder: (context, _) {
+              final hasDigits =
+                  _phoneController.text.replaceAll(RegExp(r'\D'), '').isNotEmpty;
+              return AuthPrimaryButton(
+                label: 'Continue',
+                icon: Icons.arrow_forward,
+                loading: _isLoading.value,
+                onPressed: hasDigits ? _sendCode : null,
+              );
+            },
           ),
           const SizedBox(height: 24),
           TextButton.icon(
@@ -172,7 +172,7 @@ class _LoginPageState extends State<LoginPage> {
               valueListenable: _country,
               builder: (context, country, _) => InkWell(
                 onTap: _pickCountry,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(16),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -181,21 +181,20 @@ class _LoginPageState extends State<LoginPage> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(country.flag, style: const TextStyle(fontSize: 22)),
+                      Text(country.flag, style: theme.textTheme.titleLarge),
                       const SizedBox(width: 6),
-                      Text(
-                        country.dialCode,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Text(country.dialCode, style: theme.textTheme.titleMedium),
                       const Icon(Icons.arrow_drop_down),
                     ],
                   ),
                 ),
               ),
             ),
-            Container(width: 1, height: 28, color: theme.dividerColor),
+            Container(
+              width: 1,
+              height: 28,
+              color: theme.colorScheme.outlineVariant,
+            ),
             Expanded(
               child: TextField(
                 controller: _phoneController,

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/theme/motion.dart';
 import 'package:video_player/video_player.dart';
 
 /// An animation (GIF) message.
@@ -112,6 +113,7 @@ class _MessageAnimationState extends State<MessageAnimation> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final width = (_animation['width'] ?? 300).toDouble();
     final height = (_animation['height'] ?? 200).toDouble();
     final aspectRatio = width <= 0 || height <= 0 ? 1.0 : width / height;
@@ -121,22 +123,32 @@ class _MessageAnimationState extends State<MessageAnimation> {
 
     Widget content;
     if (isPlaying) {
-      content = VideoPlayer(controller);
+      content = VideoPlayer(controller, key: const ValueKey('video'));
     } else {
       final thumbnailPath = _thumbnailPath();
       final miniThumbnail = _miniThumbnailBytes();
       if (thumbnailPath != null && thumbnailPath.isNotEmpty) {
-        content = Image.file(File(thumbnailPath), fit: BoxFit.cover);
+        content = Image.file(
+          File(thumbnailPath),
+          fit: BoxFit.cover,
+          key: const ValueKey('thumbnail'),
+        );
       } else if (miniThumbnail != null) {
         content = Image.memory(
           Uint8List.fromList(miniThumbnail),
           fit: BoxFit.cover,
           gaplessPlayback: true,
+          key: const ValueKey('minithumbnail'),
         );
       } else {
         content = Container(
-          color: Colors.grey[300],
-          child: const Icon(Icons.gif_box, size: 48),
+          key: const ValueKey('placeholder'),
+          color: scheme.surfaceContainerHighest,
+          child: Icon(
+            Icons.gif_box,
+            size: 48,
+            color: scheme.onSurfaceVariant,
+          ),
         );
       }
     }
@@ -148,34 +160,44 @@ class _MessageAnimationState extends State<MessageAnimation> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: SizedBox.expand(child: content),
+            child: SizedBox.expand(
+              child: AnimatedSwitcher(
+                duration: Motion.medium,
+                switchInCurve: Motion.standard,
+                switchOutCurve: Motion.standard,
+                child: content,
+              ),
+            ),
           ),
-          // While loading, keep the play affordance over the still frame.
-          if (!isPlaying)
-            Container(
-              decoration: const BoxDecoration(
-                color: Colors.black54,
+          // The play affordance fades out once the GIF starts playing.
+          AnimatedOpacity(
+            opacity: isPlaying ? 0 : 1,
+            duration: Motion.medium,
+            curve: Motion.standard,
+            child: Container(
+              decoration: BoxDecoration(
+                color: scheme.scrim.withValues(alpha: 0.55),
                 shape: BoxShape.circle,
               ),
               padding: const EdgeInsets.all(12),
               child: const Icon(Icons.play_arrow, color: Colors.white, size: 32),
             ),
+          ),
           Positioned(
             left: 8,
             bottom: 8,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.black54,
+                color: scheme.scrim.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: const Text(
+              child: Text(
                 'GIF',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
             ),
           ),

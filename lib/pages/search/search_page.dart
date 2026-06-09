@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/lottie_state.dart';
 
 /// Global chat search: type a query, see matching chats, tap to open one.
 ///
@@ -17,9 +19,10 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
-  final TextEditingController _controller = TextEditingController();
+  final SearchController _controller = SearchController();
   final ValueNotifier<List<Map<String, dynamic>>> _results = ValueNotifier([]);
   final ValueNotifier<bool> _isSearching = ValueNotifier(false);
+  final ValueNotifier<String> _query = ValueNotifier('');
 
   // Shared caches required by ChatListItem; empty here since search rows are
   // transient and avatars re-resolve from the chat's own file paths.
@@ -35,12 +38,14 @@ class _SearchPageState extends State<SearchPage> {
     _controller.dispose();
     _results.dispose();
     _isSearching.dispose();
+    _query.dispose();
     super.dispose();
   }
 
   void _onChanged(String value) {
     _debounce?.cancel();
     final query = value.trim();
+    _query.value = query;
     if (query.isEmpty) {
       _results.value = [];
       _isSearching.value = false;
@@ -54,14 +59,16 @@ class _SearchPageState extends State<SearchPage> {
     _isSearching.value = true;
     try {
       final chatIds = await TDLibClient.searchChats(query: query);
-      final chats = <Map<String, dynamic>>[];
-      for (final id in chatIds) {
-        final chat = await TDLibClient.getChat(chatId: id);
-        if (chat != null) chats.add(chat);
-      }
+      // Resolve all chats concurrently while preserving the result ordering.
+      final resolved = await Future.wait(
+        chatIds.map((id) => TDLibClient.getChat(chatId: id)),
+      );
       // A newer query started while we were awaiting; drop these stale results.
       if (token != _queryToken || !mounted) return;
-      _results.value = chats;
+      _results.value = [
+        for (final chat in resolved)
+          if (chat != null) chat,
+      ];
     } finally {
       if (token == _queryToken && mounted) _isSearching.value = false;
     }
@@ -83,15 +90,29 @@ class _SearchPageState extends State<SearchPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: TextField(
+        title: SearchBar(
           controller: _controller,
-          autofocus: true,
-          onChanged: _onChanged,
+          autoFocus: true,
+          hintText: 'Search chats...',
           textInputAction: TextInputAction.search,
-          decoration: const InputDecoration(
-            hintText: 'Search chats...',
-            border: InputBorder.none,
-          ),
+          onChanged: _onChanged,
+          leading: const Icon(Icons.search),
+          trailing: [
+            ValueListenableBuilder<String>(
+              valueListenable: _query,
+              builder: (context, query, child) {
+                if (query.isEmpty) return const SizedBox.shrink();
+                return IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Clear',
+                  onPressed: () {
+                    _controller.clear();
+                    _onChanged('');
+                  },
+                );
+              },
+            ),
+          ],
         ),
       ),
       body: ValueListenableBuilder<bool>(
@@ -101,14 +122,9 @@ class _SearchPageState extends State<SearchPage> {
             valueListenable: _results,
             builder: (context, results, child) {
               if (results.isEmpty) {
-                return Center(
-                  child: Text(
-                    isSearching
-                        ? 'Searching...'
-                        : _controller.text.trim().isEmpty
-                            ? 'Type to search chats'
-                            : 'No chats found',
-                  ),
+                return _SearchPlaceholder(
+                  isSearching: isSearching,
+                  query: _query.value,
                 );
               }
               return ListView.builder(
@@ -119,12 +135,46 @@ class _SearchPageState extends State<SearchPage> {
                   fileExistsCache: _fileExistsCache,
                   miniThumbnailCache: _miniThumbnailCache,
                   onTap: _openChat,
+                  highlightQuery: _query.value,
                 ),
               );
             },
           );
         },
       ),
+    );
+  }
+}
+
+/// The state shown while there are no results: prompt, spinner, or empty set.
+class _SearchPlaceholder extends StatelessWidget {
+  const _SearchPlaceholder({required this.isSearching, required this.query});
+
+  final bool isSearching;
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isSearching) {
+      return const Center(
+        child: LottieState(
+          asset: 'assets/lottie/loading.json',
+          fallbackIcon: Icons.search,
+          size: 90,
+        ),
+      );
+    }
+    if (query.isEmpty) {
+      return const EmptyState(
+        icon: Icons.search,
+        title: 'Search chats',
+        subtitle: 'Type a name to find a chat.',
+      );
+    }
+    return const EmptyState(
+      icon: Icons.search_off,
+      title: 'No chats found',
+      subtitle: 'Try a different search term.',
     );
   }
 }

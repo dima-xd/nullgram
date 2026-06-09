@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:nullgram/widgets/empty_state.dart';
 import 'chat_list_item.dart';
 
 class ChatListView extends StatefulWidget {
@@ -9,6 +10,10 @@ class ChatListView extends StatefulWidget {
   final Map<String, Uint8List?> miniThumbnailCache;
   final Function(int) onChatTap;
 
+  /// Whether the initial chat sync is still in progress. While loading and the
+  /// list is empty, skeleton rows are shown instead of the empty state.
+  final ValueNotifier<bool>? isLoading;
+
   const ChatListView({
     super.key,
     required this.chatsNotifier,
@@ -16,6 +21,7 @@ class ChatListView extends StatefulWidget {
     required this.fileExistsCache,
     required this.miniThumbnailCache,
     required this.onChatTap,
+    this.isLoading,
   });
 
   @override
@@ -27,11 +33,13 @@ class _ChatListViewState extends State<ChatListView> {
   void initState() {
     super.initState();
     widget.chatsNotifier.addListener(_onChatsUpdated);
+    widget.isLoading?.addListener(_onChatsUpdated);
   }
 
   @override
   void dispose() {
     widget.chatsNotifier.removeListener(_onChatsUpdated);
+    widget.isLoading?.removeListener(_onChatsUpdated);
     super.dispose();
   }
 
@@ -44,18 +52,26 @@ class _ChatListViewState extends State<ChatListView> {
     final chats = _getFilteredAndSortedChats();
 
     if (chats.isEmpty) {
-      return const Center(child: Text('No chats available'));
+      if (widget.isLoading?.value ?? false) {
+        return const _ChatListSkeleton();
+      }
+      return const EmptyState(
+        icon: Icons.forum_outlined,
+        title: 'No chats yet',
+        subtitle: 'Your conversations will appear here.',
+        lottieAsset: 'assets/lottie/empty.json',
+      );
     }
 
     return ListView.separated(
       key: PageStorageKey('chat_list_${widget.folderId}'),
       itemCount: chats.length,
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewPadding.bottom,
+        bottom: MediaQuery.of(context).viewPadding.bottom + 80,
       ),
       addAutomaticKeepAlives: true,
       cacheExtent: 1000,
-      separatorBuilder: (_, __) => const Divider(
+      separatorBuilder: (_, _) => const Divider(
         height: 1,
         thickness: 0.5,
         indent: 72,
@@ -111,5 +127,58 @@ class _ChatListViewState extends State<ChatListView> {
     });
 
     return allChats;
+  }
+}
+
+/// Static placeholder rows shown while the first chat sync is in flight.
+class _ChatListSkeleton extends StatelessWidget {
+  const _ChatListSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.surfaceContainerHighest;
+    return ListView.builder(
+      itemCount: 9,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      physics: const NeverScrollableScrollPhysics(),
+      itemBuilder: (context, index) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            CircleAvatar(radius: 24, backgroundColor: base),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Bar(width: 140, color: base),
+                  const SizedBox(height: 8),
+                  _Bar(width: 220, color: base),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Bar extends StatelessWidget {
+  final double width;
+  final Color color;
+
+  const _Bar({required this.width, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: 12,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(6),
+      ),
+    );
   }
 }

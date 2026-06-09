@@ -11,6 +11,7 @@ class MessageVideo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final video = content['video'];
     final thumbnail = video['thumbnail'];
 
@@ -36,13 +37,17 @@ class MessageVideo extends StatelessWidget {
           )
               : Container(
             height: 200,
-            color: Colors.grey[300],
-            child: const Icon(Icons.video_library, size: 48),
+            color: scheme.surfaceContainerHighest,
+            child: Icon(
+              Icons.video_library,
+              size: 48,
+              color: scheme.onSurface,
+            ),
           ),
         ),
         Container(
-          decoration: const BoxDecoration(
-            color: Colors.black54,
+          decoration: BoxDecoration(
+            color: scheme.scrim.withValues(alpha: 0.55),
             shape: BoxShape.circle,
           ),
           padding: const EdgeInsets.all(12),

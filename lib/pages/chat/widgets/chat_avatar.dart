@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:nullgram/theme/app_theme.dart';
 
 class ChatAvatar extends StatelessWidget {
   final Map<String, dynamic> chat;
@@ -18,8 +19,8 @@ class ChatAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget avatarWidget = _buildAvatarWidget();
-    
+    Widget avatarWidget = _buildAvatarWidget(context);
+
     Widget? statusIcon = _getStatusIcon(context);
     
     if (statusIcon != null) {
@@ -50,19 +51,19 @@ class ChatAvatar extends StatelessWidget {
     return avatarWidget;
   }
 
-  Widget _buildAvatarWidget() {
+  Widget _buildAvatarWidget(BuildContext context) {
     final photo = chat['photo'];
     final chatId = chat['id'] ?? 0;
 
     if (photo == null || photo['small'] == null) {
-      return _buildDefaultAvatar(chatId);
+      return _buildDefaultAvatar(context, chatId);
     }
 
     final path = photo['small']?['local']?['path'];
     final minithumbnail = photo['minithumbnail'];
 
     if (path == null || path.isEmpty) {
-      return _buildDefaultAvatar(chatId);
+      return _buildDefaultAvatar(context, chatId);
     }
 
     if (fileExistsCache != null && miniThumbnailCache != null) {
@@ -97,7 +98,7 @@ class ChatAvatar extends StatelessWidget {
               backgroundImage: MemoryImage(cachedThumb),
             );
           }
-          return _buildPlaceholderAvatar();
+          return _buildPlaceholderAvatar(context);
         }
       }
 
@@ -111,7 +112,7 @@ class ChatAvatar extends StatelessWidget {
         );
       }
 
-      return _buildPlaceholderAvatar();
+      return _buildPlaceholderAvatar(context);
     } else {
       return Container(
         width: radius * 2,
@@ -141,34 +142,25 @@ class ChatAvatar extends StatelessWidget {
       return Icon(
         Icons.circle,
         size: radius * 0.4,
-        color: Colors.green,
+        color: context.chatColors.onlineDot,
       );
     }
     
     return null;
   }
 
-  Widget _buildDefaultAvatar(int chatId) {
+  Widget _buildDefaultAvatar(BuildContext context, int chatId) {
     final title = chat['title'] ?? '';
     final firstLetter = title.isNotEmpty ? title[0].toUpperCase() : '?';
-    final colors = [
-      Colors.red,
-      Colors.orange,
-      Colors.yellow,
-      Colors.green,
-      Colors.blue,
-      Colors.indigo,
-      Colors.purple,
-    ];
-    final color = colors[chatId.abs() % colors.length];
+    final colors = context.chatColors.avatarColors(chatId);
 
     return CircleAvatar(
       radius: radius,
-      backgroundColor: color,
+      backgroundColor: colors.background,
       child: Text(
         firstLetter,
         style: TextStyle(
-          color: Colors.white,
+          color: colors.foreground,
           fontSize: radius * 0.7,
           fontWeight: FontWeight.bold,
         ),
@@ -176,11 +168,12 @@ class ChatAvatar extends StatelessWidget {
     );
   }
 
-  Widget _buildPlaceholderAvatar() {
+  Widget _buildPlaceholderAvatar(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return CircleAvatar(
       radius: radius,
-      backgroundColor: Colors.grey.shade300,
-      child: Icon(Icons.person, color: Colors.white54, size: radius),
+      backgroundColor: scheme.surfaceContainerHighest,
+      child: Icon(Icons.person, color: scheme.onSurfaceVariant, size: radius),
     );
   }
 

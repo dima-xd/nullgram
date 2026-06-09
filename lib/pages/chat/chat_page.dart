@@ -17,6 +17,8 @@ import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/services/call_service.dart';
+import 'package:nullgram/theme/motion.dart';
+import 'package:nullgram/widgets/empty_state.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -472,6 +474,7 @@ class _ChatPageState extends State<ChatPage> {
 
   /// Opens the long-press context menu and dispatches the chosen action.
   Future<void> _onMessageLongPress(Map<String, dynamic> message) async {
+    HapticFeedback.selectionClick();
     final chatId = widget.chat['id'] as int;
     final messageId = message['id'] as int;
 
@@ -1033,18 +1036,28 @@ class _ChatPageState extends State<ChatPage> {
       child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         border: Border(
           top: BorderSide(
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.1),
+            color: Theme.of(context).colorScheme.outlineVariant,
           ),
         ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildEditPreview(),
-          _buildReplyPreview(),
+          AnimatedSize(
+            duration: Motion.fast,
+            curve: Motion.standard,
+            alignment: Alignment.topCenter,
+            child: _buildEditPreview(),
+          ),
+          AnimatedSize(
+            duration: Motion.fast,
+            curve: Motion.standard,
+            alignment: Alignment.topCenter,
+            child: _buildReplyPreview(),
+          ),
           Row(
         children: [
           IconButton(
@@ -1092,70 +1105,79 @@ class _ChatPageState extends State<ChatPage> {
           ValueListenableBuilder<String>(
             valueListenable: _messageText,
             builder: (context, text, child) {
-              // Non-empty text turns the trailing button into a send button;
-              // an empty field falls back to the audio/video recorder.
-              if (text.trim().isNotEmpty) {
-                return GestureDetector(
-                  onTap: _sendMessage,
-                  child: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Center(
-                      child: Icon(Icons.send, color: Colors.white),
-                    ),
-                  ),
-                );
-              }
-
-              return ValueListenableBuilder<bool>(
-                valueListenable: _isAudioMode,
-                builder: (context, isAudioMode, child) {
-                  return ValueListenableBuilder<bool>(
-                    valueListenable: _isRecording,
-                    builder: (context, isRecording, child) {
-                      return GestureDetector(
-                        onTap: () {
-                          if (_isAudioMode.value && _isRecording.value) {
-                            stopAudioRecording();
-                            return;
-                          } else if (!_isAudioMode.value && _isRecording.value) {
-                            stopVideoRecording();
-                            return;
-                          }
-
-                          _isAudioMode.value = !isAudioMode;
+              // Non-empty text shows a send button; an empty field falls back to
+              // the audio/video recorder. The two morph via an AnimatedSwitcher.
+              return AnimatedSwitcher(
+                duration: Motion.fast,
+                transitionBuilder: (child, anim) => ScaleTransition(
+                  scale: anim,
+                  child: FadeTransition(opacity: anim, child: child),
+                ),
+                child: text.trim().isNotEmpty
+                    ? IconButton.filled(
+                        key: const ValueKey('send'),
+                        onPressed: _sendMessage,
+                        tooltip: 'Send',
+                        icon: const Icon(Icons.send),
+                      )
+                    : ValueListenableBuilder<bool>(
+                        key: const ValueKey('record'),
+                        valueListenable: _isAudioMode,
+                        builder: (context, isAudioMode, child) {
+                          return ValueListenableBuilder<bool>(
+                            valueListenable: _isRecording,
+                            builder: (context, isRecording, child) {
+                              return GestureDetector(
+                                onTap: () {
+                                  if (_isAudioMode.value &&
+                                      _isRecording.value) {
+                                    stopAudioRecording();
+                                    return;
+                                  } else if (!_isAudioMode.value &&
+                                      _isRecording.value) {
+                                    stopVideoRecording();
+                                    return;
+                                  }
+                                  _isAudioMode.value = !isAudioMode;
+                                },
+                                onLongPressStart: (_) async {
+                                  if (isAudioMode) {
+                                    await startAudioRecording();
+                                  } else {
+                                    await startVideoRecording();
+                                  }
+                                },
+                                child: Container(
+                                  width: 48,
+                                  height: 48,
+                                  decoration: BoxDecoration(
+                                    color: isRecording
+                                        ? Theme.of(context).colorScheme.error
+                                        : Theme.of(context).colorScheme.primary,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Center(
+                                    child: Icon(
+                                      isAudioMode
+                                          ? (isRecording
+                                              ? Icons.mic
+                                              : Icons.mic_none)
+                                          : Icons.videocam,
+                                      color: isRecording
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .onError
+                                          : Theme.of(context)
+                                              .colorScheme
+                                              .onPrimary,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          );
                         },
-                        onLongPressStart: (_) async {
-                          if (isAudioMode) {
-                            await startAudioRecording();
-                          } else {
-                            await startVideoRecording();
-                          }
-                        },
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: isRecording ? Colors.red : Theme.of(context).colorScheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Icon(
-                              isAudioMode
-                                  ? (isRecording ? Icons.mic : Icons.mic_none)
-                                  : Icons.videocam,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                },
+                      ),
               );
             },
           )
@@ -1254,13 +1276,16 @@ class _ChatPageState extends State<ChatPage> {
               valueListenable: _searchResults,
               builder: (context, results, child) {
                 if (results.isEmpty) {
-                  return Center(
-                    child: Text(
-                      _searchController.text.trim().isEmpty
-                          ? 'Type to search messages'
-                          : 'No messages found',
-                    ),
-                  );
+                  return _searchController.text.trim().isEmpty
+                      ? const EmptyState(
+                          icon: Icons.search,
+                          title: 'Search messages',
+                          subtitle: 'Type to find messages in this chat.',
+                        )
+                      : const EmptyState(
+                          icon: Icons.search_off,
+                          title: 'No messages found',
+                        );
                 }
                 return ListView.builder(
                   itemCount: results.length,
@@ -1331,7 +1356,7 @@ class _ChatPageState extends State<ChatPage> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
-                        color: scheme.onSurface.withOpacity(0.7),
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -1398,7 +1423,7 @@ class _ChatPageState extends State<ChatPage> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
-                        color: scheme.onSurface.withOpacity(0.7),
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -1418,15 +1443,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onHorizontalDragEnd: (details) {
-        const double minSwipeVelocity = 300.0;
-        if (details.primaryVelocity != null && 
-            details.primaryVelocity! > minSwipeVelocity) {
-          Navigator.of(context).pop();
-        }
-      },
-      child: Scaffold(
+    return Scaffold(
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: ValueListenableBuilder<bool>(
@@ -1472,7 +1489,10 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                     child: Row(
                       children: [
-                        ChatAvatar(chat: chatWithUser, radius: 20),
+                        Hero(
+                          tag: 'chat_avatar_${widget.chat['id']}',
+                          child: ChatAvatar(chat: chatWithUser, radius: 20),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
@@ -1480,8 +1500,7 @@ class _ChatPageState extends State<ChatPage> {
                             children: [
                               Text(
                                 widget.chat['title'] ?? 'Chat',
-                                style: const TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.w500),
+                                style: Theme.of(context).textTheme.titleMedium,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -1502,8 +1521,7 @@ class _ChatPageState extends State<ChatPage> {
                                     fontSize: 13,
                                     color: Theme.of(context)
                                         .colorScheme
-                                        .onSurface
-                                        .withOpacity(0.6),
+                                        .onSurfaceVariant,
                                   );
                                   if (user != null) {
                                     return Text(
@@ -1559,7 +1577,12 @@ class _ChatPageState extends State<ChatPage> {
                   valueListenable: _isLoading,
                   builder: (context, isLoading, child) {
                     if (messages.isEmpty && !isLoading) {
-                      return const Center(child: Text('No messages yet'));
+                      return const EmptyState(
+                        icon: Icons.forum_outlined,
+                        title: 'No messages yet',
+                        subtitle: 'Send a message to start the conversation.',
+                        lottieAsset: 'assets/lottie/empty.json',
+                      );
                     }
 
                     return ListView.builder(
@@ -1571,9 +1594,10 @@ class _ChatPageState extends State<ChatPage> {
                           return const Padding(
                             padding: EdgeInsets.all(16),
                             child: Center(
-                              child: Text(
-                                'Loading older messages',
-                                style: TextStyle(color: Colors.grey),
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(strokeWidth: 2),
                               ),
                             ),
                           );
@@ -1670,7 +1694,7 @@ class _ChatPageState extends State<ChatPage> {
           _buildMessageInput(),
         ],
       ),
-    ));
+    );
   }
 }
 

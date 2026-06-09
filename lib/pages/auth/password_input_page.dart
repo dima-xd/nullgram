@@ -33,11 +33,9 @@ class _PasswordInputPageState extends State<PasswordInputPage> {
     _isSubmitting.value = true;
     try {
       await TDLibClient.checkAuthenticationPassword(password: password);
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      showAuthError(context, 'Incorrect password. Please try again.');
     } finally {
       _isSubmitting.value = false;
     }
@@ -60,36 +58,36 @@ class _PasswordInputPageState extends State<PasswordInputPage> {
             icon: Icons.lock_outline,
           ),
           const SizedBox(height: 32),
-          AuthInputContainer(
-            child: ValueListenableBuilder<bool>(
-              valueListenable: _obscure,
-              builder: (context, obscure, _) => TextField(
-                controller: _passwordController,
-                obscureText: obscure,
-                autofocus: true,
-                decoration: authInputDecoration(
-                  hintText: 'Password',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                ).copyWith(
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      obscure ? Icons.visibility_off : Icons.visibility,
-                    ),
-                    onPressed: () => _obscure.value = !obscure,
+          ValueListenableBuilder<bool>(
+            valueListenable: _obscure,
+            builder: (context, obscure, _) => TextField(
+              controller: _passwordController,
+              obscureText: obscure,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'Password',
+                prefixIcon: const Icon(Icons.lock_outline),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    obscure ? Icons.visibility_off : Icons.visibility,
                   ),
+                  onPressed: () => _obscure.value = !obscure,
                 ),
-                onSubmitted: (_) => _submitPassword(),
               ),
+              onSubmitted: (_) => _submitPassword(),
             ),
           ),
           const SizedBox(height: 24),
-          ValueListenableBuilder<bool>(
-            valueListenable: _isSubmitting,
-            builder: (context, submitting, _) => AuthPrimaryButton(
-              label: 'Submit',
-              loading: submitting,
-              onPressed: _submitPassword,
-            ),
+          ListenableBuilder(
+            listenable: Listenable.merge([_isSubmitting, _passwordController]),
+            builder: (context, _) {
+              final hasPassword = _passwordController.text.isNotEmpty;
+              return AuthPrimaryButton(
+                label: 'Submit',
+                loading: _isSubmitting.value,
+                onPressed: hasPassword ? _submitPassword : null,
+              );
+            },
           ),
         ],
       ),

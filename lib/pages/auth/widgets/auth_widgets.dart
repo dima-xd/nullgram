@@ -29,21 +29,15 @@ class AuthScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final showAppBar = showBackButton || onBack != null;
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: showAppBar
           ? AppBar(
               backgroundColor: Colors.transparent,
               elevation: 0,
-              leading: onBack != null
-                  ? IconButton(
-                      icon: const Icon(Icons.arrow_back),
-                      onPressed: onBack,
-                    )
-                  : null,
+              scrolledUnderElevation: 0,
+              leading: onBack != null ? BackButton(onPressed: onBack) : null,
             )
           : null,
       body: SafeArea(
@@ -111,7 +105,7 @@ class AuthHeader extends StatelessWidget {
           Text(
             subtitle!,
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.textTheme.bodySmall?.color,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
             textAlign: TextAlign.center,
           ),
@@ -121,8 +115,11 @@ class AuthHeader extends StatelessWidget {
   }
 }
 
-/// Rounded, elevated surface that wraps an input. Highlights in the error
-/// color when [hasError] is true.
+/// Tonal container that wraps an input. Highlights in the error color when
+/// [hasError] is true.
+///
+/// Uses a flat Material 3 tonal surface ([ColorScheme.surfaceContainerHigh])
+/// instead of a shadowed card.
 class AuthInputContainer extends StatelessWidget {
   const AuthInputContainer({
     required this.child,
@@ -137,24 +134,14 @@ class AuthInputContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final errorColor = theme.colorScheme.error;
+    final scheme = Theme.of(context).colorScheme;
 
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: hasError ? Border.all(color: errorColor, width: 1.5) : null,
-        boxShadow: [
-          BoxShadow(
-            color: (hasError ? errorColor : Colors.black)
-                .withValues(alpha: hasError ? 0.25 : 0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(16),
+        border: hasError ? Border.all(color: scheme.error, width: 1.5) : null,
       ),
       child: child,
     );
@@ -162,13 +149,17 @@ class AuthInputContainer extends StatelessWidget {
 }
 
 /// Borderless [InputDecoration] tuned for use inside an [AuthInputContainer].
+///
+/// The fill is transparent so the input blends into its surrounding
+/// [AuthInputContainer]; standalone fields should use a plain
+/// [InputDecoration] and inherit the global filled style instead.
 InputDecoration authInputDecoration({
   String? hintText,
   Widget? prefixIcon,
   String? counterText,
 }) {
   const transparent = OutlineInputBorder(
-    borderRadius: BorderRadius.all(Radius.circular(14)),
+    borderRadius: BorderRadius.all(Radius.circular(16)),
     borderSide: BorderSide.none,
   );
   return InputDecoration(
@@ -182,6 +173,32 @@ InputDecoration authInputDecoration({
     fillColor: Colors.transparent,
     contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
   );
+}
+
+/// Shows a friendly, error-tinted [SnackBar] on the [ColorScheme.errorContainer]
+/// surface.
+///
+/// Keeps raw exception strings out of the UI; pass a user-facing [message].
+void showAuthError(BuildContext context, String message) {
+  final scheme = Theme.of(context).colorScheme;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: TextStyle(color: scheme.onErrorContainer),
+        ),
+        backgroundColor: scheme.errorContainer,
+      ),
+    );
+}
+
+/// Shows a neutral informational [SnackBar].
+void showAuthInfo(BuildContext context, String message) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(message)));
 }
 
 /// Full-width primary action button with a built-in loading state.
@@ -202,48 +219,29 @@ class AuthPrimaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final primary = theme.colorScheme.primary;
 
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: ElevatedButton(
-        onPressed: loading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: primary,
-          foregroundColor: theme.colorScheme.onPrimary,
-          disabledBackgroundColor: primary.withValues(alpha: 0.6),
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-        ),
-        child: loading
-            ? SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: theme.colorScheme.onPrimary,
-                ),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (icon != null) ...[
-                    const SizedBox(width: 8),
-                    Icon(icon, size: 20),
-                  ],
-                ],
+    return FilledButton(
+      onPressed: loading ? null : onPressed,
+      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      child: loading
+          ? SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: theme.colorScheme.onPrimary,
               ),
-      ),
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(label, style: theme.textTheme.labelLarge),
+                if (icon != null) ...[
+                  const SizedBox(width: 8),
+                  Icon(icon, size: 20),
+                ],
+              ],
+            ),
     );
   }
 }

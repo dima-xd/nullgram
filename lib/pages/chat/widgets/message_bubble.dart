@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/theme/app_theme.dart';
 import 'message_animation.dart';
 import 'message_audio.dart';
+import 'message_contact.dart';
 import 'message_document.dart';
+import 'message_location.dart';
 import 'message_photo.dart';
 import 'message_poll.dart';
+import 'message_service.dart';
 import 'message_reactions.dart';
 import 'message_sender_avatar.dart';
 import 'message_sticker.dart';
@@ -39,6 +43,19 @@ class MessageBubble extends StatelessWidget {
     this.onLongPress,
     this.onReactionTap,
   });
+
+  /// Non-media content types rendered explicitly in the bubble's text branch.
+  /// Anything outside this set (and not media or a service message) falls back
+  /// to an [unsupportedLabel] line so it is never blank.
+  static const _handledNonMedia = {
+    'MessageText',
+    'MessageLocation',
+    'MessageVenue',
+    'MessageContact',
+    'MessagePoll',
+    'MessageAnimatedEmoji',
+    'MessageDice',
+  };
 
   Widget _buildMediaContent(Map<String, dynamic> content, int messageId) {
     final contentType = content['@type'];
@@ -77,9 +94,12 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final content = message['content'] as Map<String, dynamic>;
+    final serviceText = serviceMessageText(content);
+    if (serviceText != null) return ServiceMessage(text: serviceText);
+
     final scheme = Theme.of(context).colorScheme;
     final isOutgoing = message['isOutgoing'] ?? false;
-    final content = message['content'];
     final contentType = content['@type'];
     final hasCaption = content['caption']?['text'] != null &&
         content['caption']['text'].toString().isNotEmpty;
@@ -105,8 +125,10 @@ class MessageBubble extends StatelessWidget {
     const double avatarRadius = 16;
 
     final radius = _bubbleRadius(isOutgoing);
-    final bubbleColor =
-        isOutgoing ? scheme.primaryContainer : scheme.surfaceContainerHighest;
+    final chatColors = context.chatColors;
+    final bubbleColor = isOutgoing
+        ? chatColors.outgoingBubble
+        : chatColors.incomingBubble;
 
     final margin = EdgeInsets.only(
       left: 12,
@@ -117,7 +139,7 @@ class MessageBubble extends StatelessWidget {
 
     final shadow = [
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.05),
+        color: scheme.shadow.withValues(alpha: 0.05),
         blurRadius: 2,
         offset: const Offset(0, 1),
       ),
@@ -129,11 +151,10 @@ class MessageBubble extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: Text(
               senderName,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: scheme.primary,
-              ),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
             ),
           );
 
@@ -149,6 +170,7 @@ class MessageBubble extends StatelessWidget {
               color: bubbleColor,
               borderRadius: radius,
               boxShadow: shadow,
+              border: Border.all(color: chatColors.bubbleBorder),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,6 +196,7 @@ class MessageBubble extends StatelessWidget {
           color: bubbleColor,
           borderRadius: radius,
           boxShadow: shadow,
+          border: Border.all(color: chatColors.bubbleBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,6 +240,7 @@ class MessageBubble extends StatelessWidget {
             color: bubbleColor,
             borderRadius: radius,
             boxShadow: shadow,
+            border: Border.all(color: chatColors.bubbleBorder),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,15 +251,19 @@ class MessageBubble extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Text(
                     senderName,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.primary,
-                    ),
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
                   ),
                 ),
               if (contentType == 'MessageText')
                 MessageText(content: content['text']),
+              if (contentType == 'MessageLocation' ||
+                  contentType == 'MessageVenue')
+                MessageLocation(content: content),
+              if (contentType == 'MessageContact')
+                MessageContact(content: content),
               if (contentType == 'MessagePoll')
                 SizedBox(
                   width: MediaQuery.of(context).size.width * 0.65,
@@ -244,6 +272,24 @@ class MessageBubble extends StatelessWidget {
                     chatId: chat['id'],
                     messageId: message['id'],
                   ),
+                ),
+              if (contentType == 'MessageAnimatedEmoji')
+                Text(
+                  content['emoji'] as String? ?? '',
+                  style: const TextStyle(fontSize: 48),
+                ),
+              if (contentType == 'MessageDice')
+                Text(
+                  '${content['emoji'] ?? '🎲'} ${content['value'] ?? ''}',
+                  style: const TextStyle(fontSize: 40),
+                ),
+              if (!_handledNonMedia.contains(contentType))
+                Text(
+                  unsupportedLabel(content),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontStyle: FontStyle.italic,
+                        color: scheme.onSurfaceVariant,
+                      ),
                 ),
               if (isLastInGroup) ...[
                 const SizedBox(height: 4),

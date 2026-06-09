@@ -118,18 +118,14 @@ class _MessageDocumentState extends State<MessageDocument> {
                     fileName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
                   if (size > 0)
                     Text(
                       _formatSize(size),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.onSurface.withOpacity(0.6),
-                      ),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
                     ),
                 ],
               ),

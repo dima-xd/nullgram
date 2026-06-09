@@ -224,7 +224,7 @@ class _MessageAudioState extends State<MessageAudio> {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.3),
+        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -242,20 +242,17 @@ class _MessageAudioState extends State<MessageAudio> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  style: Theme.of(context).textTheme.titleSmall,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 if (performer != null)
                   Text(
                     performer,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withOpacity(0.6),
-                    ),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -295,7 +292,8 @@ class _PlayButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
+    final color = scheme.primary;
 
     return ValueListenableBuilder<bool>(
       valueListenable: isDownloading,
@@ -330,16 +328,16 @@ class _PlayButton extends StatelessWidget {
                 height: 40,
                 decoration: BoxDecoration(color: color, shape: BoxShape.circle),
                 child: isLoading
-                    ? const Padding(
-                        padding: EdgeInsets.all(10),
+                    ? Padding(
+                        padding: const EdgeInsets.all(10),
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: scheme.onPrimary,
                         ),
                       )
                     : Icon(
                         isPlaying ? Icons.pause : Icons.play_arrow,
-                        color: Colors.white,
+                        color: scheme.onPrimary,
                       ),
               ),
             );
@@ -371,10 +369,9 @@ class _ProgressBar extends StatelessWidget {
         padding: const EdgeInsets.only(top: 2),
         child: Text(
           formatDuration(metadataDuration),
-          style: TextStyle(
-            fontSize: 12,
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-          ),
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
         ),
       );
     }
@@ -419,10 +416,10 @@ class _ProgressBar extends StatelessWidget {
     );
   }
 
-  TextStyle _timeStyle(BuildContext context) => TextStyle(
-        fontSize: 11,
-        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-      );
+  TextStyle? _timeStyle(BuildContext context) =>
+      Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          );
 }
 
 /// Voice-note progress: a tappable waveform that fills as playback advances,
@@ -455,17 +452,16 @@ class _WaveformProgress extends StatelessWidget {
               samples: samples,
               progress: 0,
               playedColor: scheme.primary,
-              unplayedColor: scheme.onSurface.withOpacity(0.25),
+              unplayedColor: scheme.onSurface.withValues(alpha: 0.25),
             ),
             const SizedBox(height: 2),
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 formatDuration(metadataDuration),
-                style: TextStyle(
-                  fontSize: 11,
-                  color: scheme.onSurface.withOpacity(0.6),
-                ),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
               ),
             ),
           ],
@@ -508,7 +504,7 @@ class _WaveformProgress extends StatelessWidget {
                       samples: samples,
                       progress: progress,
                       playedColor: scheme.primary,
-                      unplayedColor: scheme.onSurface.withOpacity(0.25),
+                      unplayedColor: scheme.onSurface.withValues(alpha: 0.25),
                     ),
                   );
                 },
@@ -519,17 +515,15 @@ class _WaveformProgress extends StatelessWidget {
                 children: [
                   Text(
                     formatDuration(position),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: scheme.onSurface.withOpacity(0.6),
-                    ),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                   ),
                   Text(
                     formatDuration(total),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: scheme.onSurface.withOpacity(0.6),
-                    ),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                   ),
                 ],
               ),

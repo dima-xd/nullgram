@@ -104,28 +104,34 @@ final Country defaultCountry =
 
 /// Opens a searchable bottom sheet and resolves to the chosen [Country], or
 /// `null` if dismissed.
-Future<Country?> showCountryPicker(BuildContext context) {
-  final theme = Theme.of(context);
+///
+/// When [selected] is provided its row is highlighted in the list.
+Future<Country?> showCountryPicker(BuildContext context, {Country? selected}) {
   return showModalBottomSheet<Country>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: theme.scaffoldBackgroundColor,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (_) => const _CountryPickerSheet(),
+    builder: (_) => _CountryPickerSheet(selected: selected),
   );
 }
 
 class _CountryPickerSheet extends StatefulWidget {
-  const _CountryPickerSheet();
+  const _CountryPickerSheet({this.selected});
+
+  final Country? selected;
 
   @override
   State<_CountryPickerSheet> createState() => _CountryPickerSheetState();
 }
 
 class _CountryPickerSheetState extends State<_CountryPickerSheet> {
+  final _searchController = TextEditingController();
   String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   List<Country> get _filtered {
     final query = _query.trim().toLowerCase();
@@ -139,7 +145,6 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final results = _filtered;
 
     return Padding(
@@ -148,57 +153,100 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
         height: MediaQuery.of(context).size.height * 0.75,
         child: Column(
           children: [
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: theme.dividerColor,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                autofocus: true,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: SearchBar(
+                controller: _searchController,
+                autoFocus: true,
+                hintText: 'Search country',
+                leading: const Icon(Icons.search),
                 onChanged: (value) => setState(() => _query = value),
-                decoration: InputDecoration(
-                  hintText: 'Search country',
-                  prefixIcon: const Icon(Icons.search),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
               ),
             ),
-            const SizedBox(height: 8),
             Expanded(
-              child: ListView.builder(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewPadding.bottom,
-                ),
-                itemCount: results.length,
-                itemBuilder: (context, index) {
-                  final country = results[index];
-                  return ListTile(
-                    leading: Text(
-                      country.flag,
-                      style: const TextStyle(fontSize: 26),
-                    ),
-                    title: Text(country.name),
-                    trailing: Text(
-                      country.dialCode,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.textTheme.bodySmall?.color,
+              child: results.isEmpty
+                  ? const _CountryEmptyState()
+                  : ListView.builder(
+                      padding: EdgeInsets.only(
+                        bottom: MediaQuery.of(context).viewPadding.bottom,
                       ),
+                      itemCount: results.length,
+                      itemBuilder: (context, index) {
+                        final country = results[index];
+                        return _CountryTile(
+                          country: country,
+                          selected: country.iso == widget.selected?.iso &&
+                              country.dialCode == widget.selected?.dialCode,
+                          onTap: () => Navigator.pop(context, country),
+                        );
+                      },
                     ),
-                    onTap: () => Navigator.pop(context, country),
-                  );
-                },
-              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A single selectable country row in the picker.
+class _CountryTile extends StatelessWidget {
+  const _CountryTile({
+    required this.country,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Country country;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ListTile(
+      selected: selected,
+      selectedTileColor: theme.colorScheme.secondaryContainer,
+      selectedColor: theme.colorScheme.onSecondaryContainer,
+      leading: Text(country.flag, style: theme.textTheme.headlineSmall),
+      title: Text(country.name),
+      trailing: Text(
+        country.dialCode,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+/// Placeholder shown when no country matches the current search query.
+class _CountryEmptyState extends StatelessWidget {
+  const _CountryEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.public_off,
+            size: 48,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No countries found',
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
     );
   }

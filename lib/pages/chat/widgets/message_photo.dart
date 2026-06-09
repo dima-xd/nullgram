@@ -128,6 +128,7 @@ class _MessagePhotoState extends State<MessagePhoto> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final photoPath = _getPhotoPath();
     final miniThumbnail = _getMiniThumbnailBytes();
     final isDownloadingActive = _isFileDownloading();
@@ -152,7 +153,7 @@ class _MessagePhotoState extends State<MessagePhoto> {
               builder: (context) => ImageDetails(
                 photoPaths: widget.albumPaths ?? [photoPath],
                 initialIndex: widget.albumIndex ?? 0,
-                heroTag: 'photo_$widget.messageId',
+                heroTag: heroTag,
               ),
             ),
           );
@@ -169,7 +170,7 @@ class _MessagePhotoState extends State<MessagePhoto> {
                 gaplessPlayback: true,
                 errorBuilder: (context, error, stackTrace) {
                   return Container(
-                    color: Colors.grey[300],
+                    color: scheme.surfaceContainerHighest,
                     child: const Icon(Icons.broken_image, size: 48),
                   );
                 },
@@ -187,7 +188,7 @@ class _MessagePhotoState extends State<MessagePhoto> {
         children: [
           Container(
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: scheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(8),
             ),
             child: miniThumbnail != null
@@ -203,7 +204,11 @@ class _MessagePhotoState extends State<MessagePhoto> {
                 ),
               ),
             )
-                : const Icon(Icons.image, size: 48, color: Colors.grey),
+                : Icon(
+                    Icons.image,
+                    size: 48,
+                    color: scheme.onSurfaceVariant,
+                  ),
           ),
           ValueListenableBuilder<bool>(
             valueListenable: _isDownloading,
@@ -215,8 +220,8 @@ class _MessagePhotoState extends State<MessagePhoto> {
                 onPressed: _downloadPhoto,
                 icon: Container(
                   padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
+                  decoration: BoxDecoration(
+                    color: scheme.scrim.withValues(alpha: 0.55),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(

@@ -394,22 +394,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         children: [
                           Text(folder['name']['text']),
                           if (unreadCount > 0) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                unreadCount.toString(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
+                            const SizedBox(width: 6),
+                            Badge(label: Text('$unreadCount')),
                           ],
                         ],
                       ),
@@ -423,6 +409,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             : null,
       ),
       drawer: const HomeMenu(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _composeNewChat,
+        tooltip: 'New message',
+        child: const Icon(Icons.edit_outlined),
+      ),
       body: folders.value.isEmpty || _tabController == null
           ? ChatListView(
         chatsNotifier: chats,
@@ -430,6 +421,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         fileExistsCache: _fileExistsCache,
         miniThumbnailCache: _miniThumbnailCache,
         onChatTap: _openChat,
+        isLoading: isLoading,
       )
           : TabBarView(
         controller: _tabController,
@@ -440,9 +432,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             fileExistsCache: _fileExistsCache,
             miniThumbnailCache: _miniThumbnailCache,
             onChatTap: _openChat,
+            isLoading: isLoading,
           );
         }).toList(),
       ),
+    );
+  }
+
+  /// Opens search as the entry point for starting a new conversation.
+  void _composeNewChat() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const SearchPage()),
     );
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/theme/motion.dart';
 
 /// A poll message: the question, each option with a result bar, and the total
 /// vote count. Tapping an option submits a vote via [TDLibClient.setPollAnswer];
@@ -38,6 +39,7 @@ class MessagePoll extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
     final options = poll['options'] as List? ?? const [];
     final totalVoters = poll['totalVoterCount'] as int? ?? 0;
     final isQuiz = poll['type']?['@type'] == 'PollTypeQuiz';
@@ -48,15 +50,12 @@ class MessagePoll extends StatelessWidget {
       children: [
         Text(
           _text(poll['question']),
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 2),
         Text(
           isQuiz ? 'Quiz' : (poll['isAnonymous'] == true ? 'Anonymous Poll' : 'Poll'),
-          style: TextStyle(
-            fontSize: 12,
-            color: scheme.onSurface.withValues(alpha: 0.6),
-          ),
+          style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 8),
         for (var i = 0; i < options.length; i++)
@@ -64,10 +63,7 @@ class MessagePoll extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           totalVoters == 1 ? '1 vote' : '$totalVoters votes',
-          style: TextStyle(
-            fontSize: 12,
-            color: scheme.onSurface.withValues(alpha: 0.6),
-          ),
+          style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
     );
@@ -88,12 +84,26 @@ class MessagePoll extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                _showResults
-                    ? (isChosen ? Icons.check_circle : Icons.circle_outlined)
-                    : Icons.radio_button_unchecked,
-                size: 18,
-                color: isChosen ? scheme.primary : scheme.onSurface.withValues(alpha: 0.5),
+              AnimatedSwitcher(
+                duration: Motion.fast,
+                switchInCurve: Motion.standard,
+                switchOutCurve: Motion.standard,
+                transitionBuilder: (child, animation) => ScaleTransition(
+                  scale: animation,
+                  child: FadeTransition(opacity: animation, child: child),
+                ),
+                child: Icon(
+                  _showResults
+                      ? (isChosen ? Icons.check_circle : Icons.circle_outlined)
+                      : Icons.radio_button_unchecked,
+                  key: ValueKey(
+                    _showResults
+                        ? (isChosen ? 'chosen' : 'shown')
+                        : 'unvoted',
+                  ),
+                  size: 18,
+                  color: isChosen ? scheme.primary : scheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -104,9 +114,16 @@ class MessagePoll extends StatelessWidget {
                       children: [
                         Expanded(child: Text(_text(option['text']))),
                         if (_showResults)
-                          Text(
-                            '$percentage%',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          TweenAnimationBuilder<double>(
+                            tween: Tween(begin: 0, end: percentage.toDouble()),
+                            duration: Motion.slow,
+                            curve: Motion.standard,
+                            builder: (context, value, child) => Text(
+                              '${value.round()}%',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                       ],
                     ),
@@ -114,11 +131,18 @@ class MessagePoll extends StatelessWidget {
                       const SizedBox(height: 4),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: percentage / 100,
-                          minHeight: 4,
-                          backgroundColor: scheme.surfaceContainerHighest,
-                          color: isChosen ? scheme.primary : scheme.secondary,
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: percentage / 100),
+                          duration: Motion.slow,
+                          curve: Motion.standard,
+                          builder: (context, value, child) =>
+                              LinearProgressIndicator(
+                            value: value,
+                            minHeight: 4,
+                            backgroundColor: scheme.surfaceContainerHighest,
+                            color:
+                                isChosen ? scheme.primary : scheme.secondary,
+                          ),
                         ),
                       ),
                     ],

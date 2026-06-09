@@ -82,7 +82,10 @@ class _ImageDetailsState extends State<ImageDetails> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.6),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .scrim
+                              .withValues(alpha: 0.55),
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(
