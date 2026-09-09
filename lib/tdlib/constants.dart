@@ -32,6 +32,7 @@ const String updateChatDraftMessageConst = 'UpdateChatDraftMessage';
 const String updateChatUnreadMentionCountConst =
     'UpdateChatUnreadMentionCount';
 const String updateChatPermissionsConst = 'UpdateChatPermissions';
+const String updateChatEmojiStatusConst = 'UpdateChatEmojiStatus';
 const String updateBasicGroupConst = 'UpdateBasicGroup';
 const String updateMessageSendSucceededConst = 'UpdateMessageSendSucceeded';
 const String updateMessageSendFailedConst = 'UpdateMessageSendFailed';

@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:nullgram/pages/chat/widgets/custom_emoji.dart';
 import 'package:nullgram/theme/motion.dart';
 import '../utils/message_formatter.dart';
 
 /// The row of reaction chips shown beneath a message bubble.
 ///
 /// Built from a TDLib `MessageReactions` object's `reactions` list. Each chip
-/// shows the emoji and its count; the current user's chosen reaction is
-/// highlighted. Tapping a chip reports its emoji so the caller can toggle it.
+/// shows the reaction and its count; the current user's chosen reaction is
+/// highlighted. Tapping a chip reports its reaction type so the caller can
+/// toggle it — a type rather than an emoji string, because a custom (premium)
+/// reaction is identified by an id and has no text form.
 class MessageReactions extends StatelessWidget {
   final List<dynamic> reactions;
   final bool isOutgoing;
-  final void Function(String emoji) onTap;
+  final void Function(Map<String, dynamic> reactionType) onTap;
 
   const MessageReactions({
     super.key,
@@ -30,9 +33,9 @@ class MessageReactions extends StatelessWidget {
       alignment: isOutgoing ? WrapAlignment.end : WrapAlignment.start,
       children: [
         for (final reaction in reactions)
-          if (reaction['type']?['@type'] == 'ReactionTypeEmoji')
+          if (reaction['type'] case final Map<String, dynamic> type)
             _ReactionChip(
-              emoji: reaction['type']['emoji'] as String,
+              type: type,
               count: reaction['totalCount'] as int? ?? 0,
               isChosen: reaction['isChosen'] == true,
               onTap: onTap,
@@ -43,17 +46,20 @@ class MessageReactions extends StatelessWidget {
 }
 
 class _ReactionChip extends StatelessWidget {
-  final String emoji;
+  final Map<String, dynamic> type;
   final int count;
   final bool isChosen;
-  final void Function(String emoji) onTap;
+  final void Function(Map<String, dynamic> reactionType) onTap;
 
   const _ReactionChip({
-    required this.emoji,
+    required this.type,
     required this.count,
     required this.isChosen,
     required this.onTap,
   });
+
+  /// The id of a custom (premium) reaction, or null for a standard emoji one.
+  int? get _customEmojiId => type['customEmojiId'] as int?;
 
   @override
   Widget build(BuildContext context) {
@@ -72,7 +78,7 @@ class _ReactionChip extends StatelessWidget {
       type: MaterialType.transparency,
       child: InkWell(
         borderRadius: radius,
-        onTap: () => onTap(emoji),
+        onTap: () => onTap(type),
         child: AnimatedContainer(
           duration: Motion.fast,
           curve: Motion.standard,
@@ -84,7 +90,18 @@ class _ReactionChip extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(emoji, style: const TextStyle(fontSize: 14)),
+              if (_customEmojiId case final customEmojiId?)
+                CustomEmoji(
+                  customEmojiId: customEmojiId,
+                  size: 16,
+                  fallback: '\u2b50',
+                  color: foreground,
+                )
+              else
+                Text(
+                  type['emoji'] as String? ?? '',
+                  style: const TextStyle(fontSize: 14),
+                ),
               if (count > 0) ...[
                 const SizedBox(width: 4),
                 AnimatedDefaultTextStyle(

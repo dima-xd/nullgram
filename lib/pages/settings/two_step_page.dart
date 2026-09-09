@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// Two-step verification: the password asked for when signing in on a new
 /// device, on top of the SMS code.
@@ -157,6 +158,7 @@ class _TwoStepPageState extends State<TwoStepPage> {
               final hint = state['passwordHint'] as String? ?? '';
 
               return ListView(
+                padding: withBottomSafeArea(context),
                 children: [
                   Padding(
                     padding: const EdgeInsets.all(16),
@@ -265,9 +267,7 @@ class _PasswordSheetState extends State<_PasswordSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
+      padding: sheetBottomPadding(context),
       child: ListView(
         shrinkWrap: true,
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),

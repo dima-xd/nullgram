@@ -216,53 +216,79 @@ class TDLibClient {
     }
   }
 
-  /// Adds an emoji reaction to a message.
+  /// A standard emoji reaction, e.g. '👍'.
+  static Map<String, dynamic> emojiReaction(String emoji) => {
+        "@type": "reactionTypeEmoji",
+        "emoji": emoji,
+      };
+
+  /// A custom (premium) emoji reaction, identified by its custom emoji id.
+  static Map<String, dynamic> customEmojiReaction(int customEmojiId) => {
+        "@type": "reactionTypeCustomEmoji",
+        "customEmojiId": customEmojiId,
+      };
+
+  /// A stable key for a reaction type, so a chosen reaction can be compared
+  /// without caring which of the variants it is.
   ///
-  /// [emoji] is the reaction's text representation (e.g. '👍'). Standard chats
-  /// allow a single chosen reaction; remove the previous one first via
-  /// [removeMessageReaction] to mimic Telegram's replace-on-tap behavior.
+  /// The bridge PascalCases response types while requests use lowercase-first,
+  /// so the discriminator is normalised out of the key entirely.
+  static String reactionKey(Map<String, dynamic>? reactionType) {
+    final emoji = reactionType?['emoji'];
+    if (emoji != null) return 'emoji:$emoji';
+    final customEmojiId = reactionType?['customEmojiId'];
+    if (customEmojiId != null) return 'custom:$customEmojiId';
+    return 'unknown';
+  }
+
+  /// Adds a reaction to a message.
+  ///
+  /// [reactionType] comes from [emojiReaction] or [customEmojiReaction].
+  /// Standard chats allow a single chosen reaction; remove the previous one
+  /// first via [removeMessageReaction] to mimic Telegram's replace-on-tap
+  /// behavior.
   static Future<void> addMessageReaction({
     required int chatId,
     required int messageId,
-    required String emoji,
+    required Map<String, dynamic> reactionType,
     bool isBig = false,
-  }) async {
-    final jsonMap = {
-      "@type": "addMessageReaction",
-      "chatId": chatId,
-      "messageId": messageId,
-      "reactionType": {
-        "@type": "reactionTypeEmoji",
-        "emoji": emoji,
-      },
-      "isBig": isBig,
-      "updateRecentReactions": true,
-    };
+  }) =>
+      _execute({
+        "@type": "addMessageReaction",
+        "chatId": chatId,
+        "messageId": messageId,
+        "reactionType": reactionType,
+        "isBig": isBig,
+        "updateRecentReactions": true,
+      });
 
-    await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap)
-    });
-  }
-
-  /// Removes a previously added emoji reaction from a message.
+  /// Removes a previously added reaction from a message.
   static Future<void> removeMessageReaction({
     required int chatId,
     required int messageId,
-    required String emoji,
-  }) async {
-    final jsonMap = {
-      "@type": "removeMessageReaction",
-      "chatId": chatId,
-      "messageId": messageId,
-      "reactionType": {
-        "@type": "reactionTypeEmoji",
-        "emoji": emoji,
-      },
-    };
+    required Map<String, dynamic> reactionType,
+  }) =>
+      _execute({
+        "@type": "removeMessageReaction",
+        "chatId": chatId,
+        "messageId": messageId,
+        "reactionType": reactionType,
+      });
 
-    await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap)
+  /// Resolves custom (premium) emoji to the stickers that render them.
+  ///
+  /// TDLib returns only the ids it found, in arbitrary order, so callers must
+  /// match results by `fullType.customEmojiId` rather than by position. At
+  /// most 200 ids per call.
+  static Future<List<Map<String, dynamic>>> getCustomEmojiStickers({
+    required List<int> customEmojiIds,
+  }) async {
+    if (customEmojiIds.isEmpty) return const [];
+    final data = await _request({
+      "@type": "getCustomEmojiStickers",
+      "customEmojiIds": customEmojiIds,
     });
+    return _mapList(data, 'stickers');
   }
 
   /// Returns the emoji reactions that can be added to the given message.
@@ -1004,7 +1030,7 @@ class TDLibClient {
           updateChatTitleConst || updateChatPhotoConst || updateBasicGroupConst ||
           updateChatNotificationSettingsConst || updateChatPermissionsConst ||
           updateChatIsMarkedAsUnreadConst || updateChatDraftMessageConst ||
-          updateChatUnreadMentionCountConst:
+          updateChatUnreadMentionCountConst || updateChatEmojiStatusConst:
           _chatUpdatesController.add(update);
         case updateNewMessageConst || updateDeleteMessagesConst ||
           updateMessageInteractionInfoConst || updateMessageContentConst ||

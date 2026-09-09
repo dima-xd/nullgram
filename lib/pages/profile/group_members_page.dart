@@ -5,6 +5,7 @@ import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// The member list of a group or channel, with the moderation actions the
 /// current user is allowed to perform.
@@ -273,6 +274,11 @@ class _GroupMembersPageState extends State<GroupMembersPage> {
                 );
               }
               return ListView.separated(
+                padding: withBottomSafeArea(
+                  context,
+                  // Room for the add-members button.
+                  EdgeInsets.only(bottom: _canManage ? 80 : 0),
+                ),
                 itemCount: members.length,
                 separatorBuilder: (_, _) => const Divider(
                   height: 1,

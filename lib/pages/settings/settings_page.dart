@@ -6,6 +6,7 @@ import 'package:nullgram/pages/settings/privacy_page.dart';
 import 'package:nullgram/pages/settings/sessions_page.dart';
 import 'package:nullgram/pages/settings/storage_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// The settings hub: appearance, notifications, privacy, storage and account.
 class SettingsPage extends StatelessWidget {
@@ -16,7 +17,10 @@ class SettingsPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
+        padding: withBottomSafeArea(
+          context,
+          const EdgeInsets.only(bottom: 24),
+        ),
         children: [
           const _SectionHeader('Appearance'),
           const _ThemeModeSelector(),

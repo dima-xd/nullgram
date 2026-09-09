@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/settings/two_step_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// Privacy and security: the blocked-senders list.
 class PrivacyPage extends StatefulWidget {
@@ -72,6 +73,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
       // A single scroll view rather than one list per section, so the
       // two-step row stays reachable even when nobody is blocked.
       body: ListView(
+        padding: withBottomSafeArea(context),
         children: [
           ListTile(
             leading: const Icon(Icons.password_outlined),

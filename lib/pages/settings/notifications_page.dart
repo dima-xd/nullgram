@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// A notification scope and its user-facing label.
 typedef _Scope = ({String type, String label, String description});
@@ -86,6 +87,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           return ValueListenableBuilder<Map<String, bool>>(
             valueListenable: _enabled,
             builder: (context, enabled, child) => ListView(
+              padding: withBottomSafeArea(context),
               children: [
                 for (final scope in _scopes)
                   SwitchListTile(

@@ -9,6 +9,7 @@ import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/lottie_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// Global search across chats and messages.
 ///
@@ -177,6 +178,7 @@ class _SearchPageState extends State<SearchPage>
       builder: (context, chats, child) {
         if (chats.isEmpty) return _placeholder('chats');
         return ListView.builder(
+          padding: withBottomSafeArea(context),
           itemCount: chats.length,
           itemBuilder: (context, index) => ChatListItem(
             chat: chats[index],
@@ -194,6 +196,7 @@ class _SearchPageState extends State<SearchPage>
       builder: (context, messages, child) {
         if (messages.isEmpty) return _placeholder('messages');
         return ListView.separated(
+          padding: withBottomSafeArea(context),
           itemCount: messages.length,
           separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
           itemBuilder: (context, index) {

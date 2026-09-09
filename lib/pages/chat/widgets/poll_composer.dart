@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// A poll the user filled in and wants to send.
 typedef PollDraft = ({
@@ -79,10 +80,8 @@ class _PollComposerState extends State<_PollComposer> {
   Widget build(BuildContext context) {
     return Padding(
       // Lift the sheet above the keyboard so the field being typed in stays
-      // visible.
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
+      // visible, and above the navigation bar when there is no keyboard.
+      padding: sheetBottomPadding(context),
       child: ListView(
         shrinkWrap: true,
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// What [CreateChatPage] is creating.
 enum NewChatKind {
@@ -105,7 +106,7 @@ class _CreateChatPageState extends State<CreateChatPage> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.kind.title)),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: withBottomSafeArea(context, const EdgeInsets.all(16)),
         children: [
           TextField(
             controller: _nameController,

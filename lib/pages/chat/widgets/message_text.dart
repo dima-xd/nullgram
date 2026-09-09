@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:nullgram/pages/chat/widgets/custom_emoji.dart';
 import 'package:nullgram/services/link_resolver.dart';
 import 'package:nullgram/theme/app_theme.dart';
 
@@ -93,6 +94,7 @@ class _MessageTextState extends State<MessageText> {
       String? linkTarget;
       String? mention;
       int? spoilerStart;
+      int? customEmojiId;
 
       for (final entity in entities) {
         final offset = entity['offset'] as int? ?? 0;
@@ -118,6 +120,8 @@ class _MessageTextState extends State<MessageText> {
             );
           case 'TextEntityTypeSpoiler':
             spoilerStart = offset;
+          case 'TextEntityTypeCustomEmoji':
+            customEmojiId = type?['customEmojiId'] as int?;
           case 'TextEntityTypeTextUrl':
             linkTarget = type?['url'] as String?;
             style = style.copyWith(color: linkColor);
@@ -166,6 +170,25 @@ class _MessageTextState extends State<MessageText> {
         linkTarget: linkTarget,
         mention: mention,
       );
+
+      // A custom emoji covers a plain emoji in the text, which stays the
+      // fallback; the sticker replaces it inline once resolved. A hidden
+      // spoiler keeps its cover, so the emoji is not revealed early.
+      if (customEmojiId != null && !isHiddenSpoiler) {
+        final emojiSize = (style.fontSize ?? 16) * 1.2;
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: CustomEmoji(
+              customEmojiId: customEmojiId,
+              size: emojiSize,
+              fallback: text.substring(start, end),
+              color: style.color,
+            ),
+          ),
+        );
+        continue;
+      }
 
       spans.add(TextSpan(
         text: text.substring(start, end),

@@ -7,6 +7,7 @@ import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/services/link_resolver.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// One tab of the shared-media browser.
 typedef _MediaTab = ({String label, String filter, bool isGrid});
@@ -176,7 +177,7 @@ class _MediaListState extends State<_MediaList> {
         if (widget.isGrid) {
           return GridView.builder(
             controller: _scrollController,
-            padding: const EdgeInsets.all(2),
+            padding: withBottomSafeArea(context, const EdgeInsets.all(2)),
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 140,
               crossAxisSpacing: 2,
@@ -192,6 +193,7 @@ class _MediaListState extends State<_MediaList> {
 
         return ListView.separated(
           controller: _scrollController,
+          padding: withBottomSafeArea(context),
           itemCount: messages.length,
           separatorBuilder: (_, _) => const Divider(height: 1, indent: 68),
           itemBuilder: (context, index) => _MediaRow(

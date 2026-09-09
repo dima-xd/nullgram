@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// Data and storage: how much space downloaded media takes, and clearing it.
 class StoragePage extends StatefulWidget {
@@ -80,6 +81,7 @@ class _StoragePageState extends State<StoragePage> {
           return ValueListenableBuilder<Map<String, dynamic>?>(
             valueListenable: _stats,
             builder: (context, stats, child) => ListView(
+              padding: withBottomSafeArea(context),
               children: [
                 _StatTile(
                   icon: Icons.perm_media_outlined,

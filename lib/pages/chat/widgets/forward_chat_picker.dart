@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// Presents a bottom sheet listing the user's chats and resolves to the chat
 /// id chosen as a forward destination, or null if dismissed.
@@ -111,6 +112,7 @@ class _ForwardChatPickerState extends State<_ForwardChatPicker> {
                           }
                           return ListView.builder(
                             controller: scrollController,
+                            padding: withBottomSafeArea(context),
                             itemCount: visible.length,
                             itemBuilder: (context, index) => ChatListItem(
                               chat: visible[index],

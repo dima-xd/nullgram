@@ -195,57 +195,55 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerLow,
-            border: Border(top: BorderSide(color: scheme.outlineVariant)),
+    // Everything below the message list has to clear the navigation bar: the
+    // app draws edge to edge, and neither the composer nor the emoji panel
+    // scrolls, so anything left under the bar would be unreachable.
+    return SafeArea(
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerLow,
+              border: Border(top: BorderSide(color: scheme.outlineVariant)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedSize(
+                  duration: Motion.fast,
+                  curve: Motion.standard,
+                  alignment: Alignment.topCenter,
+                  child: _buildPendingPreview(),
+                ),
+                ValueListenableBuilder<bool>(
+                  valueListenable: _isRecording,
+                  builder: (context, isRecording, child) =>
+                      isRecording ? _buildRecordingRow() : _buildComposerRow(),
+                ),
+              ],
+            ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedSize(
-                duration: Motion.fast,
-                curve: Motion.standard,
-                alignment: Alignment.topCenter,
-                child: _buildPendingPreview(),
-              ),
-              ValueListenableBuilder<bool>(
-                valueListenable: _isRecording,
-                builder: (context, isRecording, child) =>
-                    isRecording ? _buildRecordingRow() : _buildComposerRow(),
-              ),
-            ],
+          ValueListenableBuilder<bool>(
+            valueListenable: _showEmoji,
+            builder: (context, show, child) => AnimatedSize(
+              duration: Motion.fast,
+              curve: Motion.standard,
+              alignment: Alignment.topCenter,
+              child: show
+                  ? EmojiPanel(
+                      onEmoji: _insertEmoji,
+                      onSticker: widget.onSticker,
+                      onGif: widget.onGif,
+                      onBackspace: _backspace,
+                    )
+                  : const SizedBox.shrink(),
+            ),
           ),
-        ),
-        ValueListenableBuilder<bool>(
-          valueListenable: _showEmoji,
-          builder: (context, show, child) => AnimatedSize(
-            duration: Motion.fast,
-            curve: Motion.standard,
-            alignment: Alignment.topCenter,
-            child: show
-                ? EmojiPanel(
-                    onEmoji: _insertEmoji,
-                    onSticker: widget.onSticker,
-                    onGif: widget.onGif,
-                    onBackspace: _backspace,
-                  )
-                : const SizedBox.shrink(),
-          ),
-        ),
-        // Only reserve the safe area when the panel is closed; the panel
-        // already sits above the navigation bar.
-        ValueListenableBuilder<bool>(
-          valueListenable: _showEmoji,
-          builder: (context, show, child) => SizedBox(
-            height: show ? 0 : MediaQuery.of(context).viewPadding.bottom,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

@@ -3,6 +3,7 @@ import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// The messages queued to be sent in a chat later.
 ///
@@ -93,6 +94,7 @@ class _ScheduledMessagesPageState extends State<ScheduledMessagesPage> {
                 );
               }
               return ListView.separated(
+                padding: withBottomSafeArea(context),
                 itemCount: messages.length,
                 separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {

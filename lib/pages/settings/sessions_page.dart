@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// The devices signed in to this account, with the option to sign others out.
 class SessionsPage extends StatefulWidget {
@@ -92,6 +93,7 @@ class _SessionsPageState extends State<SessionsPage> {
             builder: (context, sessions, child) => RefreshIndicator(
               onRefresh: _load,
               child: ListView.separated(
+                padding: withBottomSafeArea(context),
                 itemCount: sessions.length,
                 separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {

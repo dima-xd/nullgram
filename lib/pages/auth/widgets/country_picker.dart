@@ -168,7 +168,7 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
                   ? const _CountryEmptyState()
                   : ListView.builder(
                       padding: EdgeInsets.only(
-                        bottom: MediaQuery.of(context).viewPadding.bottom,
+                        bottom: MediaQuery.paddingOf(context).bottom,
                       ),
                       itemCount: results.length,
                       itemBuilder: (context, index) {

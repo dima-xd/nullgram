@@ -4,6 +4,7 @@ import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// The account's contact list.
 ///
@@ -152,6 +153,11 @@ class _ContactsPageState extends State<ContactsPage> {
                   return ValueListenableBuilder<Set<int>>(
                     valueListenable: _selected,
                     builder: (context, selected, child) => ListView.builder(
+                      padding: withBottomSafeArea(
+                        context,
+                        // Room for the "next" button in selection mode.
+                        EdgeInsets.only(bottom: widget.selectable ? 80 : 0),
+                      ),
                       itemCount: visible.length,
                       itemBuilder: (context, index) {
                         final user = visible[index];

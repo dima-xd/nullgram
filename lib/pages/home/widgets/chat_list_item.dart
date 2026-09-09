@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/td_bytes.dart';
 import '../../chat/widgets/chat_avatar.dart';
+import '../../chat/widgets/emoji_status.dart';
 
 /// One row of a chat list: avatar, title, last-message preview and the
 /// unread/muted/pinned indicators Telegram shows in the same places.
@@ -67,13 +68,15 @@ class ChatListItem extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Expanded(
+                      Flexible(
                         child: _ChatTitle(
                           title: chat['title'] as String? ?? 'Unknown',
                           hasUnread: hasUnread,
                           highlightQuery: highlightQuery,
                         ),
                       ),
+                      EmojiStatusBadge(chat: chat, size: 15),
+                      const Spacer(),
                       if (muted)
                         Padding(
                           padding: const EdgeInsets.only(left: 4),

@@ -14,9 +14,13 @@ class AlbumBubble extends StatefulWidget {
   /// Called when the album is long-pressed, to open the context menu.
   final void Function(Map<String, dynamic> message)? onLongPress;
 
-  /// Called when a reaction chip is tapped, to toggle that reaction.
-  final void Function(Map<String, dynamic> message, String emoji)?
-      onReactionTap;
+  /// Called when a reaction chip is tapped, to toggle that reaction. Takes a
+  /// TDLib reaction *type*, since a custom (premium) reaction has an id rather
+  /// than an emoji string.
+  final void Function(
+    Map<String, dynamic> message,
+    Map<String, dynamic> reactionType,
+  )? onReactionTap;
 
   const AlbumBubble({
     super.key,
@@ -98,7 +102,7 @@ class _AlbumBubbleState extends State<AlbumBubble> {
       child: MessageReactions(
         reactions: reactions,
         isOutgoing: isOutgoing,
-        onTap: (emoji) => widget.onReactionTap?.call(message, emoji),
+        onTap: (type) => widget.onReactionTap?.call(message, type),
       ),
     );
   }

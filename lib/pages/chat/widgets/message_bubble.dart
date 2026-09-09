@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/utils/sender_names.dart';
 import 'package:nullgram/theme/app_theme.dart';
+import 'message_animated_emoji.dart';
 import 'message_animation.dart';
 import 'message_audio.dart';
 import 'message_contact.dart';
@@ -41,9 +42,13 @@ class MessageBubble extends StatelessWidget {
   /// so a plain tap does nothing in normal reading.
   final void Function(Map<String, dynamic> message)? onTap;
 
-  /// Called when a reaction chip is tapped, to toggle that reaction.
-  final void Function(Map<String, dynamic> message, String emoji)?
-      onReactionTap;
+  /// Called when a reaction chip is tapped, to toggle that reaction. Takes a
+  /// TDLib reaction *type*, since a custom (premium) reaction has an id rather
+  /// than an emoji string.
+  final void Function(
+    Map<String, dynamic> message,
+    Map<String, dynamic> reactionType,
+  )? onReactionTap;
 
   /// Called with the id of the message a reply quote points at.
   final void Function(int messageId)? onReplyTap;
@@ -306,10 +311,7 @@ class MessageBubble extends StatelessWidget {
                   ),
                 ),
               if (contentType == 'MessageAnimatedEmoji')
-                Text(
-                  content['emoji'] as String? ?? '',
-                  style: const TextStyle(fontSize: 48),
-                ),
+                MessageAnimatedEmoji(content: content),
               if (contentType == 'MessageDice')
                 Text(
                   '${content['emoji'] ?? '🎲'} ${content['value'] ?? ''}',
@@ -353,7 +355,7 @@ class MessageBubble extends StatelessWidget {
               child: MessageReactions(
                 reactions: reactionsList,
                 isOutgoing: isOutgoing,
-                onTap: (emoji) => onReactionTap?.call(message, emoji),
+                onTap: (type) => onReactionTap?.call(message, type),
               ),
             ),
           if (replyMarkup != null)

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// Edits a group's or channel's name, description and photo.
 ///
@@ -103,7 +104,7 @@ class _EditChatPageState extends State<EditChatPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: withBottomSafeArea(context, const EdgeInsets.all(16)),
         children: [
           Center(
             child: ValueListenableBuilder<String?>(

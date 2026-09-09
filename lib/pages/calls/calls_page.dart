@@ -5,6 +5,7 @@ import 'package:nullgram/services/call_service.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// The call log.
 ///
@@ -65,6 +66,7 @@ class _CallsPageState extends State<CallsPage> {
               return RefreshIndicator(
                 onRefresh: _load,
                 child: ListView.separated(
+                  padding: withBottomSafeArea(context),
                   itemCount: calls.length,
                   separatorBuilder: (_, _) => const Divider(
                     height: 1,

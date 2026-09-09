@@ -33,6 +33,7 @@ where the focus is on **simplicity, and functionality** - not monetization.
 - Voice messages: hold to record, slide to cancel, real waveforms
 - Round video messages, and fullscreen playback for every video
 - Stickers, including animated (TGS), plus saved GIFs
+- Custom (premium) emoji in text, reactions and emoji statuses
 - Silent send, "send when online" and scheduled messages
 - Bot inline keyboards, including callback buttons
 - Per-chat message search, shared-media browser, jump-to-message

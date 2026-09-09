@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 import 'chat_actions_sheet.dart';
 import 'chat_list_item.dart';
 
@@ -56,8 +57,10 @@ class ChatListView extends StatelessWidget {
         return ListView.separated(
           key: PageStorageKey('chat_list_${kind.name}_$folderId'),
           itemCount: chats.length + headerCount,
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewPadding.bottom + 80,
+          // The extra room is for the compose button floating over the list.
+          padding: withBottomSafeArea(
+            context,
+            const EdgeInsets.only(bottom: 80),
           ),
           cacheExtent: 1000,
           separatorBuilder: (_, _) => const Divider(

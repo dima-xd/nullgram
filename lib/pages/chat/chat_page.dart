@@ -15,6 +15,7 @@ import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/chat/widgets/chat_composer.dart';
 import 'package:nullgram/pages/chat/widgets/chat_menu.dart';
 import 'package:nullgram/pages/chat/widgets/date_separator.dart';
+import 'package:nullgram/pages/chat/widgets/emoji_status.dart';
 import 'package:nullgram/pages/chat/widgets/forward_chat_picker.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/message_context_menu.dart';
@@ -527,30 +528,35 @@ class _ChatPageState extends State<ChatPage> {
   // Message actions
   // ---------------------------------------------------------------------------
 
-  /// Adds or removes the [emoji] reaction on [message]. Mirrors Telegram's
+  /// Adds or removes [reactionType] on [message]. Mirrors Telegram's
   /// single-reaction behavior: tapping a chosen reaction clears it, while a new
   /// one first removes any currently chosen reactions. The visible state is
   /// refreshed by the resulting `UpdateMessageInteractionInfo`.
+  ///
+  /// Works on a reaction *type* rather than an emoji string, so custom
+  /// (premium) reactions — which have an id and no text form — toggle the same
+  /// way as standard ones.
   Future<void> _toggleReaction(
     Map<String, dynamic> message,
-    String emoji,
+    Map<String, dynamic> reactionType,
   ) async {
     final messageId = message['id'] as int;
     final reactions =
         message['interactionInfo']?['reactions']?['reactions'] as List? ??
             const [];
 
-    final chosen = reactions
-        .where((r) =>
-            r['isChosen'] == true && r['type']?['@type'] == 'ReactionTypeEmoji')
-        .map((r) => r['type']['emoji'] as String)
-        .toList();
+    final chosen = <Map<String, dynamic>>[
+      for (final reaction in reactions)
+        if (reaction['isChosen'] == true)
+          if (reaction['type'] case final Map<String, dynamic> type) type,
+    ];
+    final tappedKey = TDLibClient.reactionKey(reactionType);
 
-    if (chosen.contains(emoji)) {
+    if (chosen.any((type) => TDLibClient.reactionKey(type) == tappedKey)) {
       await TDLibClient.removeMessageReaction(
         chatId: _chatId,
         messageId: messageId,
-        emoji: emoji,
+        reactionType: reactionType,
       );
       return;
     }
@@ -559,14 +565,25 @@ class _ChatPageState extends State<ChatPage> {
       await TDLibClient.removeMessageReaction(
         chatId: _chatId,
         messageId: messageId,
-        emoji: existing,
+        // A response type is PascalCase; requests need lowercase-first.
+        reactionType: _asRequestReaction(existing),
       );
     }
     await TDLibClient.addMessageReaction(
       chatId: _chatId,
       messageId: messageId,
-      emoji: emoji,
+      reactionType: reactionType,
     );
+  }
+
+  /// Rebuilds a reaction type read off a message into the shape a request
+  /// wants, rather than sending the bridge's PascalCase `@type` back at it.
+  Map<String, dynamic> _asRequestReaction(Map<String, dynamic> type) {
+    final customEmojiId = type['customEmojiId'] as int?;
+    if (customEmojiId != null) {
+      return TDLibClient.customEmojiReaction(customEmojiId);
+    }
+    return TDLibClient.emojiReaction(type['emoji'] as String? ?? '');
   }
 
   /// Opens the long-press context menu and dispatches the chosen action.
@@ -599,7 +616,10 @@ class _ChatPageState extends State<ChatPage> {
     if (result == null || !mounted) return;
 
     if (result.reactEmoji != null) {
-      await _toggleReaction(message, result.reactEmoji!);
+      await _toggleReaction(
+        message,
+        TDLibClient.emojiReaction(result.reactEmoji!),
+      );
       return;
     }
 
@@ -1623,6 +1643,7 @@ class _ChatPageState extends State<ChatPage> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            EmojiStatusBadge(chat: chatWithUser),
                             if (isChatMuted(chat))
                               Padding(
                                 padding: const EdgeInsets.only(left: 6),
@@ -1690,7 +1711,7 @@ class _ChatPageState extends State<ChatPage> {
     // Selection mode replaces the composer with its action bar in the app bar,
     // so nothing is offered here.
     if (selection != null) {
-      return SizedBox(height: MediaQuery.of(context).viewPadding.bottom);
+      return SizedBox(height: MediaQuery.paddingOf(context).bottom);
     }
 
     return ValueListenableBuilder<Map<String, dynamic>>(
@@ -1702,7 +1723,7 @@ class _ChatPageState extends State<ChatPage> {
           // No composer for channels/restricted chats. Still reserve the
           // bottom safe-area inset so the newest messages don't slide under
           // the OS navigation buttons.
-          return SizedBox(height: MediaQuery.of(context).viewPadding.bottom);
+          return SizedBox(height: MediaQuery.paddingOf(context).bottom);
         }
         return ChatComposer(
           controller: _messageController,

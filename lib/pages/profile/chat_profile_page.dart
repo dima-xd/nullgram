@@ -263,7 +263,9 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                       chatId: widget.chat['id'] as int,
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  SizedBox(
+                    height: 24 + MediaQuery.paddingOf(context).bottom,
+                  ),
                 ]),
               ),
             ],

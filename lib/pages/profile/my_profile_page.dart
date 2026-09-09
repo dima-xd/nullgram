@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:nullgram/pages/profile/widgets/profile_header_sliver.dart';
 import 'package:nullgram/pages/profile/widgets/profile_info_tile.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/widgets/safe_insets.dart';
 
 /// The current user's own profile: avatar, name, username, phone and bio.
 ///
@@ -144,7 +145,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  SizedBox(
+                    height: 24 + MediaQuery.paddingOf(context).bottom,
+                  ),
                 ]),
               ),
             ],
@@ -397,7 +400,7 @@ class _EditSheetScaffold extends StatelessWidget {
         left: 24,
         right: 24,
         top: 8,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        bottom: sheetBottomPadding(context).bottom + 24,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:nullgram/services/avatar_cache.dart';
+import 'package:nullgram/services/custom_emoji_cache.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
@@ -273,6 +274,12 @@ class ChatStore extends ChangeNotifier {
               'unreadMentionCount': update['unreadMentionCount'] ?? 0,
             });
 
+      case updateChatEmojiStatusConst:
+        _patchChat(
+          update['chatId'] as int,
+          (chat) => {...chat, 'emojiStatus': update['emojiStatus']},
+        );
+
       case updateChatPermissionsConst:
         _patchChat(
           update['chatId'] as int,
@@ -506,6 +513,7 @@ class ChatStore extends ChangeNotifier {
     _folders = const [];
     _albums.clear();
     AvatarCache.clear();
+    CustomEmojiCache.clear();
     _isLoading = true;
     _started = false;
     notifyListeners();

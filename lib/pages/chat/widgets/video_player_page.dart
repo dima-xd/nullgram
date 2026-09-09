@@ -148,7 +148,9 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
               Positioned(
                 left: 16,
                 right: 16,
-                bottom: 32,
+                // Clear of the navigation bar: the page is drawn edge to edge
+                // behind it.
+                bottom: 32 + MediaQuery.paddingOf(context).bottom,
                 child: _buildProgress(),
               ),
             ],
