@@ -88,6 +88,7 @@ class ChatStore extends ChangeNotifier {
     for (final chat in chats) {
       if (chat == null) continue;
       _maybeDownloadPhoto(chat);
+      _maybeResolveAlbum(chat);
       _chats[chat['id'] as int] = chat;
     }
     notifyListeners();
@@ -110,6 +111,57 @@ class ChatStore extends ChangeNotifier {
     }
   }
 
+  /// Albums resolved for a chat-list preview, keyed by their album id.
+  ///
+  /// TDLib's `lastMessage` is a single message, and in an album only one member
+  /// carries the caption — usually the first, while `lastMessage` is the last.
+  /// Reading the preview off `lastMessage` alone therefore shows "Photo" for an
+  /// album that visibly has a caption. Each album is resolved once, off the
+  /// render path.
+  final Map<int, List<Map<String, dynamic>>> _albums = {};
+
+  /// A message's album id, or null when it isn't part of an album.
+  static int? albumIdOf(Map<String, dynamic>? message) {
+    final id = message?['mediaAlbumId'] as int?;
+    return (id == null || id == 0) ? null : id;
+  }
+
+  /// Resolves and caches the album [lastMessage] belongs to.
+  Future<void> _resolveAlbum(
+    int chatId,
+    int albumId,
+    Map<String, dynamic> lastMessage,
+  ) async {
+    if (_albums.containsKey(albumId)) return;
+    // Claim the id before awaiting, so the burst of updates that arrives with
+    // a new album doesn't start the same fetch several times over.
+    _albums[albumId] = const [];
+
+    _albums[albumId] = await collectAlbumMembers(
+      lastMessage: lastMessage,
+      albumId: albumId,
+      fetchOlder: (fromMessageId) async {
+        final history = await TDLibClient.getChatHistory(
+          chatId: chatId,
+          fromMessageId: fromMessageId,
+          offset: 0,
+          limit: maxAlbumSize,
+          onlyLocal: false,
+        );
+        return history?.messages ?? const [];
+      },
+    );
+    notifyListeners();
+  }
+
+  /// Starts resolving [chat]'s album preview when it has one.
+  void _maybeResolveAlbum(Map<String, dynamic> chat) {
+    final lastMessage = chat['lastMessage'] as Map<String, dynamic>?;
+    final albumId = albumIdOf(lastMessage);
+    if (albumId == null || _albums.containsKey(albumId)) return;
+    _resolveAlbum(chat['id'] as int, albumId, lastMessage!);
+  }
+
   /// Replaces the stored chat for [chatId] by applying [patch] to a copy of it.
   /// Does nothing when the chat isn't known yet.
   void _patchChat(
@@ -127,6 +179,7 @@ class ChatStore extends ChangeNotifier {
       case updateNewChatConst:
         final chat = Map<String, dynamic>.from(update['chat'] as Map);
         _maybeDownloadPhoto(chat);
+        _maybeResolveAlbum(chat);
         _chats[chat['id'] as int] = chat;
         notifyListeners();
 
@@ -160,11 +213,13 @@ class ChatStore extends ChangeNotifier {
           for (final position in incoming) {
             positions = _mergeInto(positions, position);
           }
-          return {
+          final updated = {
             ...chat,
             'lastMessage': update['lastMessage'],
             'positions': positions,
           };
+          _maybeResolveAlbum(updated);
+          return updated;
         });
 
       case updateChatReadInboxConst:
@@ -361,7 +416,10 @@ class ChatStore extends ChangeNotifier {
       return _orderOf(b.$2).compareTo(_orderOf(a.$2));
     });
 
-    return [for (final entry in visible) _withResolvedSender(entry.$1)];
+    return [
+      for (final entry in visible)
+        _withResolvedAlbum(_withResolvedSender(entry.$1)),
+    ];
   }
 
   /// Merges the cached user or supergroup behind a chat into it.
@@ -384,6 +442,16 @@ class ChatStore extends ChangeNotifier {
     }
   }
 
+  /// Attaches the resolved album members to a chat, under `lastMessageAlbum`,
+  /// so the row can render the album's own caption and thumbnails.
+  Map<String, dynamic> _withResolvedAlbum(Map<String, dynamic> chat) {
+    final albumId = albumIdOf(chat['lastMessage'] as Map<String, dynamic>?);
+    if (albumId == null) return chat;
+    final members = _albums[albumId];
+    if (members == null || members.isEmpty) return chat;
+    return {...chat, 'lastMessageAlbum': members};
+  }
+
   /// The cached user for [userId], or null when it hasn't been pushed yet.
   Map<String, dynamic>? user(int userId) => _users[userId];
 
@@ -404,7 +472,7 @@ class ChatStore extends ChangeNotifier {
   /// The chat for [chatId] with its peer merged in, or null when unknown.
   Map<String, dynamic>? chat(int chatId) {
     final chat = _chats[chatId];
-    return chat == null ? null : _withResolvedSender(chat);
+    return chat == null ? null : _withResolvedAlbum(_withResolvedSender(chat));
   }
 
   /// The number of chats with something unread in [kind], optionally scoped to
@@ -436,6 +504,7 @@ class ChatStore extends ChangeNotifier {
     _users.clear();
     _supergroups.clear();
     _folders = const [];
+    _albums.clear();
     AvatarCache.clear();
     _isLoading = true;
     _started = false;
@@ -448,6 +517,64 @@ class ChatStore extends ChangeNotifier {
     _fileSubscription?.cancel();
     super.dispose();
   }
+}
+
+/// Telegram caps an album at ten items.
+const int maxAlbumSize = 10;
+
+/// Collects every member of the album [lastMessage] belongs to, newest last.
+///
+/// Album members are contiguous in message-id order, so the history is paged
+/// backwards from the newest member until a message outside the album shows up.
+/// Paging is unavoidable: `getChatHistory` documents that "the number of
+/// returned messages is chosen by TDLib and can be smaller than the specified
+/// limit", and in practice a single call often answers with one message —
+/// which is what made a three-photo album read as "1 photo".
+///
+/// [fetchOlder] returns the messages older than a given id, newest first. It is
+/// injected so the walk can be exercised against that short-batch behaviour.
+Future<List<Map<String, dynamic>>> collectAlbumMembers({
+  required Map<String, dynamic> lastMessage,
+  required int albumId,
+  required Future<List<Map<String, dynamic>>> Function(int fromMessageId)
+      fetchOlder,
+}) async {
+  // The last member is already in hand; only the older ones need fetching.
+  final members = <int, Map<String, dynamic>>{
+    lastMessage['id'] as int: lastMessage,
+  };
+  var cursor = lastMessage['id'] as int;
+  var reachedAlbumStart = false;
+
+  // A short batch is normal, so an empty answer doesn't prove the history
+  // ended — but it does after a couple of tries.
+  var emptyRounds = 0;
+
+  while (!reachedAlbumStart && members.length < maxAlbumSize && emptyRounds < 2) {
+    final older = await fetchOlder(cursor);
+    var advanced = false;
+
+    for (final message in older) {
+      final messageId = message['id'] as int;
+      // `offset: 0` is documented as starting "from exactly" the cursor, and
+      // TDLib has shipped it both inclusive and exclusive; skipping ids that
+      // are already held makes the walk correct either way.
+      if (messageId >= cursor) continue;
+      cursor = messageId;
+      advanced = true;
+
+      if (ChatStore.albumIdOf(message) != albumId) {
+        reachedAlbumStart = true;
+        break;
+      }
+      members[messageId] = message;
+    }
+
+    emptyRounds = advanced ? 0 : emptyRounds + 1;
+  }
+
+  return members.values.toList()
+    ..sort((a, b) => (a['id'] as int).compareTo(b['id'] as int));
 }
 
 /// Whether a chat is muted, i.e. its notifications are suppressed.

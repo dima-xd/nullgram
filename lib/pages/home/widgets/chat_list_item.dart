@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:nullgram/services/chat_store.dart';
+import 'package:nullgram/tdlib/td_bytes.dart';
 import '../../chat/widgets/chat_avatar.dart';
 
 /// One row of a chat list: avatar, title, last-message preview and the
@@ -103,7 +106,9 @@ class ChatListItem extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      if (draft == null && _previewIcon(lastMessage) != null) ...[
+                      if (draft == null &&
+                          chat['lastMessageAlbum'] == null &&
+                          _previewIcon(lastMessage) != null) ...[
                         Icon(
                           _previewIcon(lastMessage),
                           size: 16,
@@ -176,6 +181,8 @@ class ChatListItem extends StatelessWidget {
         return Icons.videocam_outlined;
       case 'MessageVoiceNote':
         return Icons.mic_none;
+      case 'MessageVideoNote':
+        return Icons.video_camera_front_outlined;
       case 'MessageAudio':
         return Icons.music_note_outlined;
       case 'MessageDocument':
@@ -261,6 +268,23 @@ class _Preview extends StatelessWidget {
     }
 
     final prefix = _senderPrefix();
+    final album = chat['lastMessageAlbum'] as List?;
+
+    if (album != null && album.isNotEmpty) {
+      final members = List<Map<String, dynamic>>.from(album);
+      if (prefix == null) {
+        return _AlbumPreview(members: members, style: style);
+      }
+      // Keep the "You:" / sender prefix outside the album span, so the
+      // thumbnails still line up after it.
+      return Row(
+        children: [
+          Text('$prefix: ', style: style?.copyWith(color: scheme.onSurface)),
+          Expanded(child: _AlbumPreview(members: members, style: style)),
+        ],
+      );
+    }
+
     return Text.rich(
       TextSpan(
         style: style,
@@ -309,6 +333,13 @@ String messagePreviewText(Map<String, dynamic>? message) {
 
   final caption = content['caption']?['text'] as String?;
 
+  // An album member without the caption would otherwise read as a lone
+  // "Photo", which is what makes an unresolved album row look wrong.
+  if (ChatStore.albumIdOf(message) != null &&
+      (caption == null || caption.isEmpty)) {
+    return 'Album';
+  }
+
   switch (content['@type'] as String?) {
     case 'MessageText':
       return content['text']?['text'] as String? ?? '';
@@ -318,6 +349,8 @@ String messagePreviewText(Map<String, dynamic>? message) {
       return caption?.isNotEmpty == true ? caption! : 'Video';
     case 'MessageVoiceNote':
       return 'Voice message';
+    case 'MessageVideoNote':
+      return 'Video message';
     case 'MessageAudio':
       return 'Audio';
     case 'MessageDocument':
@@ -351,6 +384,106 @@ String messagePreviewText(Map<String, dynamic>? message) {
     default:
       return 'Message';
   }
+}
+
+
+/// The chat-list preview for an album: a few tiny thumbnails followed by the
+/// album's caption.
+///
+/// Telegram treats an album as several messages that share a `mediaAlbumId`,
+/// and only one of them carries the caption. Showing the caption next to the
+/// thumbnails is what makes an album row readable — the last member on its own
+/// says nothing but "Photo".
+class _AlbumPreview extends StatelessWidget {
+  const _AlbumPreview({
+    required this.members,
+    required this.style,
+  });
+
+  final List<Map<String, dynamic>> members;
+  final TextStyle? style;
+
+  /// How many thumbnails fit before the text without crowding the row.
+  static const int _maxThumbnails = 3;
+  static const double _thumbnailSize = 16;
+
+  @override
+  Widget build(BuildContext context) {
+    final thumbnails = [
+      for (final member in members.take(_maxThumbnails))
+        if (albumThumbnailBytes(member) case final bytes?) bytes,
+    ];
+
+    return Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          for (final bytes in thumbnails)
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 3),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: Image.memory(
+                    bytes,
+                    width: _thumbnailSize,
+                    height: _thumbnailSize,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ),
+            ),
+          if (thumbnails.isNotEmpty) const TextSpan(text: ' '),
+          TextSpan(text: _albumText()),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  /// The album's caption, or a count when nobody wrote one.
+  String _albumText() {
+    for (final member in members) {
+      final caption = member['content']?['caption']?['text'] as String?;
+      if (caption != null && caption.isNotEmpty) return caption;
+    }
+    return '${members.length} ${_kindLabel()}';
+  }
+
+  /// What the album is made of, so the fallback reads "4 photos" rather than
+  /// the generic "Album".
+  String _kindLabel() {
+    final types = {
+      for (final member in members) member['content']?['@type'] as String?,
+    };
+    if (types.length == 1) {
+      return switch (types.single) {
+        'MessagePhoto' => members.length == 1 ? 'photo' : 'photos',
+        'MessageVideo' => members.length == 1 ? 'video' : 'videos',
+        'MessageDocument' => members.length == 1 ? 'file' : 'files',
+        'MessageAudio' => members.length == 1 ? 'track' : 'tracks',
+        _ => 'items',
+      };
+    }
+    return 'items';
+  }
+}
+
+/// The minithumbnail of an album member, whatever media it holds.
+///
+/// TDLib nests the minithumbnail under the content's own media field, which is
+/// named differently per type.
+Uint8List? albumThumbnailBytes(Map<String, dynamic> message) {
+  final content = message['content'] as Map<String, dynamic>?;
+  final media = content?['photo'] ??
+      content?['video'] ??
+      content?['document'] ??
+      content?['audio'] ??
+      content?['animation'];
+  return TdBytes.decode(media?['minithumbnail']?['data']);
 }
 
 /// Chat title that optionally emphasizes the substring matching a search query.

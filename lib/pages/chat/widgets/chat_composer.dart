@@ -17,8 +17,10 @@ class ChatComposer extends StatefulWidget {
     required this.replyTo,
     required this.editing,
     required this.onSend,
+    required this.onSendOptions,
     required this.onVoice,
     required this.onSticker,
+    required this.onGif,
     required this.onAttach,
     required this.onFormat,
     required this.onInsertLink,
@@ -36,11 +38,18 @@ class ChatComposer extends StatefulWidget {
 
   final VoidCallback onSend;
 
+  /// Called when the send button is held, to offer silent and scheduled
+  /// delivery.
+  final VoidCallback onSendOptions;
+
   /// Called with a finished recording, or with null when it was cancelled or
   /// too short to send.
   final void Function(VoiceRecording? recording) onVoice;
 
   final void Function(int fileId) onSticker;
+
+  /// Called with the file id of the saved GIF to send.
+  final void Function(int fileId) onGif;
   final VoidCallback onAttach;
 
   /// Wraps the current selection in MarkdownV2 markers.
@@ -222,6 +231,7 @@ class _ChatComposerState extends State<ChatComposer> {
                 ? EmojiPanel(
                     onEmoji: _insertEmoji,
                     onSticker: widget.onSticker,
+                    onGif: widget.onGif,
                     onBackspace: _backspace,
                   )
                 : const SizedBox.shrink(),
@@ -303,11 +313,14 @@ class _ChatComposerState extends State<ChatComposer> {
                 child: FadeTransition(opacity: anim, child: child),
               ),
               child: text.trim().isNotEmpty
-                  ? IconButton.filled(
+                  ? GestureDetector(
                       key: const ValueKey('send'),
-                      onPressed: widget.onSend,
-                      tooltip: 'Send',
-                      icon: const Icon(Icons.send),
+                      onLongPress: widget.onSendOptions,
+                      child: IconButton.filled(
+                        onPressed: widget.onSend,
+                        tooltip: 'Send (hold for options)',
+                        icon: const Icon(Icons.send),
+                      ),
                     )
                   : _buildRecordButton(),
             );

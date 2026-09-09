@@ -8,6 +8,7 @@ import 'message_document.dart';
 import 'message_location.dart';
 import 'message_photo.dart';
 import 'message_poll.dart';
+import 'message_keyboard.dart';
 import 'message_reply.dart';
 import 'message_service.dart';
 import 'message_reactions.dart';
@@ -81,6 +82,7 @@ class MessageBubble extends StatelessWidget {
     'MessageDocument',
     'MessageSticker',
     'MessageAnimation',
+    'MessageVideoNote',
   };
 
   Widget _buildMediaContent(Map<String, dynamic> content, int messageId) {
@@ -88,6 +90,7 @@ class MessageBubble extends StatelessWidget {
       case 'MessagePhoto':
         return MessagePhoto(content: content, messageId: messageId);
       case 'MessageVideo':
+      case 'MessageVideoNote':
         return MessageVideo(content: content);
       case 'MessageAudio':
       case 'MessageVoiceNote':
@@ -332,6 +335,7 @@ class MessageBubble extends StatelessWidget {
 
     final reactionsList =
         message['interactionInfo']?['reactions']?['reactions'] as List?;
+    final replyMarkup = message['replyMarkup'] as Map<String, dynamic>?;
 
     final bubbleColumn = Container(
       constraints: BoxConstraints(
@@ -351,6 +355,12 @@ class MessageBubble extends StatelessWidget {
                 isOutgoing: isOutgoing,
                 onTap: (emoji) => onReactionTap?.call(message, emoji),
               ),
+            ),
+          if (replyMarkup != null)
+            MessageKeyboard(
+              replyMarkup: replyMarkup,
+              chatId: chat['id'] as int,
+              messageId: message['id'] as int,
             ),
         ],
       ),

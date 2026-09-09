@@ -7,6 +7,7 @@ enum ChatMenuAction {
   openProfile,
   search,
   selectMessages,
+  scheduledMessages,
   toggleMute,
   clearHistory,
   toggleBlock,
@@ -52,6 +53,11 @@ Future<ChatMenuAction?> showChatMenu({
             icon: Icons.checklist,
             label: 'Select messages',
             action: ChatMenuAction.selectMessages,
+          ),
+          _Item(
+            icon: Icons.schedule_send_outlined,
+            label: 'Scheduled messages',
+            action: ChatMenuAction.scheduledMessages,
           ),
           _Item(
             icon: muted ? Icons.volume_up : Icons.volume_off,

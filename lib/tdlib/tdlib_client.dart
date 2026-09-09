@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:logger/logger.dart';
 import 'package:nullgram/tdlib/models/message.dart';
+import 'package:nullgram/tdlib/send_options.dart';
 import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -49,6 +50,7 @@ class TDLibClient {
     required String text,
     int? replyToMessageId,
     List<Map<String, dynamic>>? entities,
+    SendOptions options = SendOptions.normal,
   }) async {
     final jsonMap = {
       "@type": "sendMessage",
@@ -58,6 +60,7 @@ class TDLibClient {
           "@type": "inputMessageReplyToMessage",
           "messageId": replyToMessageId,
         },
+      if (options.toJson() case final sendOptions?) "options": sendOptions,
       "inputMessageContent": {
         "@type": "inputMessageText",
         "text": {
@@ -537,6 +540,7 @@ class TDLibClient {
     required String path,
     String caption = '',
     int? replyToMessageId,
+    SendOptions options = SendOptions.normal,
   }) =>
       _sendLocalMedia(
         chatId: chatId,
@@ -545,6 +549,7 @@ class TDLibClient {
         path: path,
         caption: caption,
         replyToMessageId: replyToMessageId,
+        options: options,
       );
 
   /// Sends a video from a local [path] with an optional [caption].
@@ -553,6 +558,7 @@ class TDLibClient {
     required String path,
     String caption = '',
     int? replyToMessageId,
+    SendOptions options = SendOptions.normal,
   }) =>
       _sendLocalMedia(
         chatId: chatId,
@@ -561,6 +567,7 @@ class TDLibClient {
         path: path,
         caption: caption,
         replyToMessageId: replyToMessageId,
+        options: options,
       );
 
   /// Sends an arbitrary file from a local [path] as a document.
@@ -569,6 +576,7 @@ class TDLibClient {
     required String path,
     String caption = '',
     int? replyToMessageId,
+    SendOptions options = SendOptions.normal,
   }) =>
       _sendLocalMedia(
         chatId: chatId,
@@ -577,6 +585,7 @@ class TDLibClient {
         path: path,
         caption: caption,
         replyToMessageId: replyToMessageId,
+        options: options,
       );
 
   /// Shared body for the local-file media senders. [fileField] is the TDLib
@@ -588,6 +597,7 @@ class TDLibClient {
     required String path,
     required String caption,
     int? replyToMessageId,
+    SendOptions options = SendOptions.normal,
   }) async {
     final jsonMap = {
       "@type": "sendMessage",
@@ -597,6 +607,7 @@ class TDLibClient {
           "@type": "inputMessageReplyToMessage",
           "messageId": replyToMessageId,
         },
+      if (options.toJson() case final sendOptions?) "options": sendOptions,
       "inputMessageContent": {
         "@type": contentType,
         fileField: {
@@ -1151,6 +1162,7 @@ class TDLibClient {
     required List<({String path, bool isVideo})> items,
     String caption = '',
     int? replyToMessageId,
+    SendOptions options = SendOptions.normal,
   }) =>
       _execute({
         "@type": "sendMessageAlbum",
@@ -1161,6 +1173,8 @@ class TDLibClient {
             "@type": "inputMessageReplyToMessage",
             "messageId": replyToMessageId,
           },
+        if (options.toJson() case final sendOptions?)
+          "options": sendOptions,
         "inputMessageContents": [
           for (final (index, item) in items.indexed)
             {
@@ -1756,5 +1770,314 @@ class TDLibClient {
       _request({
         "@type": "getSupergroupFullInfo",
         "supergroupId": supergroupId,
+      });
+
+  // ---------------------------------------------------------------------------
+  // Group and channel administration
+  // ---------------------------------------------------------------------------
+
+  /// Returns members of a supergroup or channel.
+  ///
+  /// [filter] is a `SupergroupMembersFilter*` type name; the default lists the
+  /// most recently active members.
+  static Future<List<Map<String, dynamic>>> getSupergroupMembers({
+    required int supergroupId,
+    String filter = 'supergroupMembersFilterRecent',
+    int offset = 0,
+    int limit = 200,
+  }) async {
+    final data = await _request({
+      "@type": "getSupergroupMembers",
+      "supergroupId": supergroupId,
+      "filter": {"@type": filter},
+      "offset": offset,
+      "limit": limit,
+    });
+    return _mapList(data, 'members');
+  }
+
+  /// Invites users into a chat.
+  static Future<void> addChatMembers({
+    required int chatId,
+    required List<int> userIds,
+  }) =>
+      _execute({
+        "@type": "addChatMembers",
+        "chatId": chatId,
+        "userIds": userIds,
+        "forwardLimit": 0,
+      });
+
+  /// Sets a member's status in a chat.
+  ///
+  /// [status] is a full `chatMemberStatus*` object, since each variant carries
+  /// its own fields — see [memberStatus], [adminStatus] and the removal helpers
+  /// below rather than building one by hand.
+  static Future<void> setChatMemberStatus({
+    required int chatId,
+    required int userId,
+    required Map<String, dynamic> status,
+  }) =>
+      _execute({
+        "@type": "setChatMemberStatus",
+        "chatId": chatId,
+        "memberId": {"@type": "messageSenderUser", "userId": userId},
+        "status": status,
+      });
+
+  /// The status of an ordinary member, used to demote an administrator.
+  static Map<String, dynamic> memberStatus() => {
+        "@type": "chatMemberStatusMember",
+      };
+
+  /// The status of an administrator with the everyday moderation rights.
+  ///
+  /// Deliberately leaves out ownership-adjacent powers (adding other admins,
+  /// anonymity), which Telegram also keeps off by default.
+  static Map<String, dynamic> adminStatus({String customTitle = ''}) => {
+        "@type": "chatMemberStatusAdministrator",
+        "customTitle": customTitle,
+        "canBeEdited": true,
+        "rights": {
+          "@type": "chatAdministratorRights",
+          "canManageChat": true,
+          "canChangeInfo": true,
+          "canPostMessages": true,
+          "canEditMessages": true,
+          "canDeleteMessages": true,
+          "canInviteUsers": true,
+          "canRestrictMembers": true,
+          "canPinMessages": true,
+          "canManageTopics": true,
+          "canPromoteMembers": false,
+          "canManageVideoChats": true,
+          "canPostStories": false,
+          "canEditStories": false,
+          "canDeleteStories": false,
+          "isAnonymous": false,
+        },
+      };
+
+  /// Removes a user from a chat without banning them.
+  static Future<void> removeChatMember({
+    required int chatId,
+    required int userId,
+  }) =>
+      setChatMemberStatus(
+        chatId: chatId,
+        userId: userId,
+        status: {"@type": "chatMemberStatusLeft"},
+      );
+
+  /// Bans a user from a chat permanently.
+  static Future<void> banChatMember({
+    required int chatId,
+    required int userId,
+  }) =>
+      setChatMemberStatus(
+        chatId: chatId,
+        userId: userId,
+        status: {
+          "@type": "chatMemberStatusBanned",
+          // Zero means "forever" for a ban's expiry.
+          "bannedUntilDate": 0,
+        },
+      );
+
+  /// Sets a chat's photo from a local image file.
+  static Future<void> setChatPhoto({
+    required int chatId,
+    required String path,
+  }) =>
+      _execute({
+        "@type": "setChatPhoto",
+        "chatId": chatId,
+        "photo": {
+          "@type": "inputChatPhotoStatic",
+          "photo": {"@type": "inputFileLocal", "path": path},
+        },
+      });
+
+  /// Sets a group's or channel's description.
+  static Future<void> setChatDescription({
+    required int chatId,
+    required String description,
+  }) =>
+      _execute({
+        "@type": "setChatDescription",
+        "chatId": chatId,
+        "description": description,
+      });
+
+  /// Creates (or returns) the invite link for a chat the user administers.
+  static Future<String?> replacePrimaryChatInviteLink({
+    required int chatId,
+  }) async {
+    final data = await _request({
+      "@type": "createChatInviteLink",
+      "chatId": chatId,
+      "name": "",
+      "expirationDate": 0,
+      "memberLimit": 0,
+      "createsJoinRequest": false,
+    });
+    return data?['inviteLink'] as String?;
+  }
+
+  // ---------------------------------------------------------------------------
+  // More message kinds
+  // ---------------------------------------------------------------------------
+
+  /// Sends a round video message.
+  ///
+  /// [length] is the diameter of the square source video in pixels; TDLib
+  /// crops it to a circle on display.
+  static Future<void> sendVideoNote({
+    required int chatId,
+    required String path,
+    required int duration,
+    int length = 384,
+    int? replyToMessageId,
+    SendOptions options = SendOptions.normal,
+  }) =>
+      _execute({
+        "@type": "sendMessage",
+        "chatId": chatId,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        if (options.toJson() case final sendOptions?)
+          "options": sendOptions,
+        "inputMessageContent": {
+          "@type": "inputMessageVideoNote",
+          "videoNote": {"@type": "inputFileLocal", "path": path},
+          "duration": duration,
+          "length": length,
+        },
+      });
+
+  /// Shares a Telegram user as a contact card.
+  static Future<void> sendContact({
+    required int chatId,
+    required int userId,
+    required String firstName,
+    String lastName = '',
+    String phoneNumber = '',
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "sendMessage",
+        "chatId": chatId,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        "inputMessageContent": {
+          "@type": "inputMessageContact",
+          "contact": {
+            "@type": "contact",
+            "phoneNumber": phoneNumber,
+            "firstName": firstName,
+            "lastName": lastName,
+            "vcard": "",
+            "userId": userId,
+          },
+        },
+      });
+
+  /// Returns the user's saved GIFs.
+  static Future<List<Map<String, dynamic>>> getSavedAnimations() async {
+    final data = await _request({"@type": "getSavedAnimations"});
+    return _mapList(data, 'animations');
+  }
+
+  /// Sends a saved GIF by its file id.
+  static Future<void> sendAnimation({
+    required int chatId,
+    required int fileId,
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "sendMessage",
+        "chatId": chatId,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        "inputMessageContent": {
+          "@type": "inputMessageAnimation",
+          "animation": {"@type": "inputFileId", "id": fileId},
+          "duration": 0,
+          "width": 0,
+          "height": 0,
+        },
+      });
+
+  /// The messages a chat has scheduled for later, newest first.
+  static Future<List<Map<String, dynamic>>> getChatScheduledMessages({
+    required int chatId,
+  }) async {
+    final data = await _request({
+      "@type": "getChatScheduledMessages",
+      "chatId": chatId,
+    });
+    return _mapList(data, 'messages');
+  }
+
+  /// Presses an inline-keyboard button and returns the bot's answer.
+  ///
+  /// [data] is the button's opaque callback payload, which the bridge hands
+  /// over as Base64 because TDLib types it as bytes.
+  static Future<Map<String, dynamic>?> getCallbackQueryAnswer({
+    required int chatId,
+    required int messageId,
+    required List<int> data,
+  }) =>
+      _request({
+        "@type": "getCallbackQueryAnswer",
+        "chatId": chatId,
+        "messageId": messageId,
+        "payload": {
+          "@type": "callbackQueryPayloadData",
+          "data": TdBytes.encode(data),
+        },
+      });
+
+  // ---------------------------------------------------------------------------
+  // Secret chats and two-step verification
+  // ---------------------------------------------------------------------------
+
+  /// Starts an end-to-end encrypted chat with [userId] and returns it.
+  static Future<Map<String, dynamic>?> createNewSecretChat({
+    required int userId,
+  }) =>
+      _request({"@type": "createNewSecretChat", "userId": userId});
+
+  /// The account's two-step verification state.
+  static Future<Map<String, dynamic>?> getPasswordState() =>
+      _request({"@type": "getPasswordState"});
+
+  /// Sets, changes or (with an empty [newPassword]) removes the two-step
+  /// verification password.
+  ///
+  /// Returns the new state, or null when TDLib rejected the change — most
+  /// often because [oldPassword] was wrong.
+  static Future<Map<String, dynamic>?> setPassword({
+    String oldPassword = '',
+    String newPassword = '',
+    String newHint = '',
+    String newRecoveryEmailAddress = '',
+  }) =>
+      _request({
+        "@type": "setPassword",
+        "oldPassword": oldPassword,
+        "newPassword": newPassword,
+        "newHint": newHint,
+        "setRecoveryEmailAddress": newRecoveryEmailAddress.isNotEmpty,
+        "newRecoveryEmailAddress": newRecoveryEmailAddress,
       });
 }

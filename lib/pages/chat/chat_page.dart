@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:nullgram/pages/chat/utils/albums_grouper.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
+import 'package:nullgram/pages/chat/scheduled_messages_page.dart';
 import 'package:nullgram/pages/chat/utils/voice_recorder.dart';
 import 'package:nullgram/pages/chat/widgets/album_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
@@ -17,14 +19,18 @@ import 'package:nullgram/pages/chat/widgets/forward_chat_picker.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/message_context_menu.dart';
 import 'package:nullgram/pages/chat/widgets/poll_composer.dart';
+import 'package:nullgram/pages/chat/widgets/send_options_sheet.dart';
+import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/pages/profile/chat_profile_page.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/tdlib/constants.dart';
+import 'package:nullgram/tdlib/send_options.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/services/call_service.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'package:video_player/video_player.dart';
 
 /// A single conversation: its history, composer and per-chat actions.
 class ChatPage extends StatefulWidget {
@@ -586,6 +592,8 @@ class _ChatPageState extends State<ChatPage> {
       canEdit: message['canBeEdited'] == true,
       canPin: message['canBePinned'] == true,
       isPinned: message['isPinned'] == true,
+      // Only a chat with a public username can produce a t.me link.
+      canCopyLink: _chat.value['type']?['@type'] == 'ChatTypeSupergroup',
     );
 
     if (result == null || !mounted) return;
@@ -608,6 +616,8 @@ class _ChatPageState extends State<ChatPage> {
         await _forwardMessages([messageId]);
       case MessageMenuAction.select:
         _selection.value = {messageId};
+      case MessageMenuAction.copyLink:
+        await _copyMessageLink(messageId);
       case MessageMenuAction.pin:
         await TDLibClient.pinChatMessage(
           chatId: _chatId,
@@ -648,6 +658,21 @@ class _ChatPageState extends State<ChatPage> {
       Clipboard.setData(ClipboardData(text: text));
       _toast('Copied to clipboard');
     }
+  }
+
+  /// Copies a public link to the message, when the chat has one.
+  Future<void> _copyMessageLink(int messageId) async {
+    final link = await TDLibClient.getMessageLink(
+      chatId: _chatId,
+      messageId: messageId,
+    );
+    if (!mounted) return;
+    if (link == null) {
+      _toast('This chat has no public links');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: link));
+    if (mounted) _toast('Link copied');
   }
 
   /// Picks a destination chat and forwards the given messages into it.
@@ -898,7 +923,9 @@ class _ChatPageState extends State<ChatPage> {
   // Sending
   // ---------------------------------------------------------------------------
 
-  Future<void> _sendMessage() async {
+  Future<void> _sendMessage({
+    SendOptions options = SendOptions.normal,
+  }) async {
     final raw = _messageController.text.trim();
     if (raw.isEmpty) return;
 
@@ -935,7 +962,23 @@ class _ChatPageState extends State<ChatPage> {
       text: text,
       replyToMessageId: replyToMessageId,
       entities: entities,
+      options: options,
     );
+    if (mounted && options.isScheduled) _toast('Message scheduled');
+  }
+
+  /// Offers silent and scheduled delivery for the message being composed.
+  Future<void> _sendWithOptions() async {
+    if (_messageController.text.trim().isEmpty) return;
+    // Editing rewrites an existing message, which has no delivery to schedule.
+    if (_editing.value != null) return;
+
+    final options = await showSendOptionsSheet(
+      context: context,
+      isPrivateChat: _chatUserId() != null,
+    );
+    if (options == null || !mounted) return;
+    await _sendMessage(options: options);
   }
 
   Future<void> _onVoiceRecorded(VoiceRecording? recording) async {
@@ -960,6 +1003,16 @@ class _ChatPageState extends State<ChatPage> {
       replyToMessageId: replyToMessageId,
     );
     await TDLibClient.addRecentSticker(fileId: fileId);
+  }
+
+  Future<void> _onGifPicked(int fileId) async {
+    final replyToMessageId = _replyTo.value?['id'] as int?;
+    _replyTo.value = null;
+    await TDLibClient.sendAnimation(
+      chatId: _chatId,
+      fileId: fileId,
+      replyToMessageId: replyToMessageId,
+    );
   }
 
   /// Wraps the current selection with [left]/[right] markers and keeps the
@@ -1051,11 +1104,28 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.video_camera_front_outlined),
+              title: const Text('Video message'),
+              subtitle: const Text('A round clip, up to a minute'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _recordAndSendVideoNote();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.insert_drive_file_outlined),
               title: const Text('Document'),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickAndSendDocument();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outlined),
+              title: const Text('Contact'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _pickAndSendContact();
               },
             ),
             ListTile(
@@ -1138,6 +1208,49 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  /// Records a round video message with the front camera and sends it.
+  ///
+  /// Telegram records these inline; the system camera is used here instead,
+  /// which produces the same `inputMessageVideoNote` without shipping a
+  /// preview pipeline.
+  Future<void> _recordAndSendVideoNote() async {
+    final file = await ImagePicker().pickVideo(
+      source: ImageSource.camera,
+      preferredCameraDevice: CameraDevice.front,
+      maxDuration: const Duration(minutes: 1),
+    );
+    if (file == null) return;
+
+    final duration = await _videoDuration(file.path);
+    final replyToMessageId = _replyTo.value?['id'] as int?;
+    _replyTo.value = null;
+
+    await TDLibClient.sendVideoNote(
+      chatId: _chatId,
+      path: file.path,
+      duration: duration,
+      replyToMessageId: replyToMessageId,
+    );
+  }
+
+  /// Reads a local video's length in seconds.
+  ///
+  /// TDLib wants the duration up front and won't probe the file itself, so the
+  /// video player is used purely to read the metadata. Falls back to zero,
+  /// which TDLib accepts.
+  Future<int> _videoDuration(String path) async {
+    final controller = VideoPlayerController.file(File(path));
+    try {
+      await controller.initialize();
+      return controller.value.duration.inSeconds;
+    } catch (e) {
+      logger.w('Could not read the video duration: $e');
+      return 0;
+    } finally {
+      await controller.dispose();
+    }
+  }
+
   Future<void> _pickAndSendDocument() async {
     final result = await FilePicker.pickFiles();
     final path = result?.files.single.path;
@@ -1149,6 +1262,35 @@ class _ChatPageState extends State<ChatPage> {
       path: path,
       caption: composer.caption,
       replyToMessageId: composer.replyToMessageId,
+    );
+  }
+
+  /// Picks one of the user's Telegram contacts and shares them as a card.
+  Future<void> _pickAndSendContact() async {
+    final picked = await Navigator.push<List<int>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const ContactsPage(
+          selectable: true,
+          title: 'Share a contact',
+        ),
+      ),
+    );
+    final userId = picked?.firstOrNull;
+    if (userId == null) return;
+
+    final user = await TDLibClient.getUser(userId: userId);
+    if (!mounted || user == null) return;
+
+    final replyToMessageId = _replyTo.value?['id'] as int?;
+    _replyTo.value = null;
+    await TDLibClient.sendContact(
+      chatId: _chatId,
+      userId: userId,
+      firstName: user['firstName'] as String? ?? '',
+      lastName: user['lastName'] as String? ?? '',
+      phoneNumber: user['phoneNumber'] as String? ?? '',
+      replyToMessageId: replyToMessageId,
     );
   }
 
@@ -1207,6 +1349,13 @@ class _ChatPageState extends State<ChatPage> {
         _openSearch();
       case ChatMenuAction.selectMessages:
         _selection.value = const {};
+      case ChatMenuAction.scheduledMessages:
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ScheduledMessagesPage(chat: _chat.value),
+          ),
+        );
       case ChatMenuAction.toggleMute:
         await TDLibClient.setChatNotificationSettings(
           chatId: _chatId,
@@ -1456,6 +1605,15 @@ class _ChatPageState extends State<ChatPage> {
                       children: [
                         Row(
                           children: [
+                            if (chat['type']?['@type'] == 'ChatTypeSecret')
+                              Padding(
+                                padding: const EdgeInsets.only(right: 4),
+                                child: Icon(
+                                  Icons.lock,
+                                  size: 14,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                              ),
                             Flexible(
                               child: Text(
                                 chat['title'] as String? ?? 'Chat',
@@ -1552,8 +1710,10 @@ class _ChatPageState extends State<ChatPage> {
           replyTo: _replyTo,
           editing: _editing,
           onSend: _sendMessage,
+          onSendOptions: _sendWithOptions,
           onVoice: _onVoiceRecorded,
           onSticker: _onStickerPicked,
+          onGif: _onGifPicked,
           onAttach: _showAttachMenu,
           onFormat: _wrapSelection,
           onInsertLink: _insertLink,

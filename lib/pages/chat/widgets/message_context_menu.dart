@@ -9,6 +9,7 @@ enum MessageMenuAction {
   copy,
   forward,
   select,
+  copyLink,
   pin,
   unpin,
   delete,
@@ -39,6 +40,7 @@ Future<MessageMenuResult?> showMessageContextMenu({
   bool canEdit = false,
   bool canPin = false,
   bool isPinned = false,
+  bool canCopyLink = false,
 }) {
   return showGeneralDialog<MessageMenuResult>(
     context: context,
@@ -53,6 +55,7 @@ Future<MessageMenuResult?> showMessageContextMenu({
       canEdit: canEdit,
       canPin: canPin,
       isPinned: isPinned,
+      canCopyLink: canCopyLink,
     ),
     transitionBuilder: (context, animation, _, child) {
       final curved = CurvedAnimation(parent: animation, curve: Curves.easeOut);
@@ -73,6 +76,7 @@ class _MessageMenu extends StatelessWidget {
   final bool canEdit;
   final bool canPin;
   final bool isPinned;
+  final bool canCopyLink;
 
   const _MessageMenu({
     required this.availableReactions,
@@ -80,6 +84,7 @@ class _MessageMenu extends StatelessWidget {
     required this.canEdit,
     required this.canPin,
     required this.isPinned,
+    required this.canCopyLink,
   });
 
   @override
@@ -95,6 +100,7 @@ class _MessageMenu extends StatelessWidget {
             canEdit: canEdit,
             canPin: canPin,
             isPinned: isPinned,
+            canCopyLink: canCopyLink,
           ),
         ],
       ),
@@ -167,12 +173,14 @@ class _MenuList extends StatelessWidget {
   final bool canEdit;
   final bool canPin;
   final bool isPinned;
+  final bool canCopyLink;
 
   const _MenuList({
     required this.canDelete,
     required this.canEdit,
     required this.canPin,
     required this.isPinned,
+    required this.canCopyLink,
   });
 
   @override
@@ -219,6 +227,14 @@ class _MenuList extends StatelessWidget {
               onTap: () => Navigator.of(context).pop(
                   const MessageMenuResult.action(MessageMenuAction.select)),
             ),
+            if (canCopyLink)
+              _MenuItem(
+                icon: Icons.link,
+                label: 'Copy link',
+                onTap: () => Navigator.of(context).pop(
+                    const MessageMenuResult.action(
+                        MessageMenuAction.copyLink)),
+              ),
             if (canPin)
               _MenuItem(
                 icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,

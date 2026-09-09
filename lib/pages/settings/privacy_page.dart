@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
+import 'package:nullgram/pages/settings/two_step_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
-import 'package:nullgram/widgets/empty_state.dart';
 
 /// Privacy and security: the blocked-senders list.
 class PrivacyPage extends StatefulWidget {
@@ -65,66 +65,103 @@ class _PrivacyPageState extends State<PrivacyPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Privacy and security')),
-      body: ValueListenableBuilder<bool>(
-        valueListenable: _isLoading,
-        builder: (context, isLoading, child) {
-          if (isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return ValueListenableBuilder<List<Map<String, dynamic>>>(
-            valueListenable: _blocked,
-            builder: (context, blocked, child) {
-              if (blocked.isEmpty) {
-                return const EmptyState(
-                  icon: Icons.lock_open,
-                  title: 'Nobody is blocked',
-                  subtitle:
-                      'Blocked users cannot message you or see when you are '
-                      'online.',
+      // A single scroll view rather than one list per section, so the
+      // two-step row stays reachable even when nobody is blocked.
+      body: ListView(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.password_outlined),
+            title: const Text('Two-step verification'),
+            subtitle: const Text('A password on top of the login code'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const TwoStepPage()),
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+            child: Text(
+              'Blocked users',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(color: theme.colorScheme.primary),
+            ),
+          ),
+          ValueListenableBuilder<bool>(
+            valueListenable: _isLoading,
+            builder: (context, isLoading, child) {
+              if (isLoading) {
+                return const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: CircularProgressIndicator()),
                 );
               }
-              return ListView.separated(
-                itemCount: blocked.length + 1,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    return Padding(
-                      padding: const EdgeInsets.all(16),
+              return ValueListenableBuilder<List<Map<String, dynamic>>>(
+                valueListenable: _blocked,
+                builder: (context, blocked, child) {
+                  if (blocked.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 24),
                       child: Text(
-                        'Blocked users',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
+                        'Nobody is blocked. Blocked users cannot message you '
+                        'or see when you are online.',
                       ),
                     );
                   }
-                  final user = blocked[index - 1];
-                  final name = _displayName(user);
-                  return ListTile(
-                    leading: ChatAvatar(
-                      chat: {
-                        'id': user['id'],
-                        'title': name,
-                        'photo': user['profilePhoto'],
-                      },
-                      radius: 22,
-                    ),
-                    title: Text(name),
-                    subtitle: user['phoneNumber'] != null
-                        ? Text('+${user['phoneNumber']}')
-                        : null,
-                    trailing: TextButton(
-                      onPressed: () => _unblock(user),
-                      child: const Text('Unblock'),
-                    ),
+                  return Column(
+                    children: [
+                      for (final user in blocked)
+                        _BlockedUserTile(
+                          user: user,
+                          name: _displayName(user),
+                          onUnblock: () => _unblock(user),
+                        ),
+                    ],
                   );
                 },
               );
             },
-          );
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One row of the blocked-users list.
+class _BlockedUserTile extends StatelessWidget {
+  const _BlockedUserTile({
+    required this.user,
+    required this.name,
+    required this.onUnblock,
+  });
+
+  final Map<String, dynamic> user;
+  final String name;
+  final VoidCallback onUnblock;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: ChatAvatar(
+        chat: {
+          'id': user['id'],
+          'title': name,
+          'photo': user['profilePhoto'],
         },
+        radius: 22,
+      ),
+      title: Text(name),
+      subtitle:
+          user['phoneNumber'] != null ? Text('+${user['phoneNumber']}') : null,
+      trailing: TextButton(
+        onPressed: onUnblock,
+        child: const Text('Unblock'),
       ),
     );
   }

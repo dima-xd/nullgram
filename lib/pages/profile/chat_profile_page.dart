@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
+import 'package:nullgram/pages/profile/edit_chat_page.dart';
+import 'package:nullgram/pages/profile/group_members_page.dart';
+import 'package:nullgram/pages/profile/shared_media_page.dart';
 import 'package:nullgram/pages/profile/widgets/profile_header_sliver.dart';
 import 'package:nullgram/pages/profile/widgets/profile_info_tile.dart';
 import 'package:nullgram/services/call_service.dart';
@@ -92,6 +96,27 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
     );
   }
 
+  /// Whether TDLib says the signed-in user may rename this chat, which is
+  /// the same right that gates the description and photo.
+  bool _canEditChat() =>
+      _chatUserId() == null &&
+      widget.chat['permissions']?['canChangeInfo'] == true;
+
+  Future<void> _openEdit() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditChatPage(
+          chat: widget.chat,
+          description:
+              _groupFullInfo.value?['description'] as String? ?? '',
+        ),
+      ),
+    );
+    // The edit screen writes through TDLib, so re-read what came back.
+    await _loadGroupInfo();
+  }
+
   String? _subtitle(Map<String, dynamic>? user) {
     if (user != null) return MessageFormatter.getUserStatus(user);
     final supergroup = widget.chat['supergroup'];
@@ -142,11 +167,52 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                       onPressed: _toggleMute,
                     ),
                   ),
+                  if (_canEditChat())
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      tooltip: 'Edit',
+                      onPressed: _openEdit,
+                    ),
                 ],
               ),
               SliverList(
                 delegate: SliverChildListDelegate([
-                  if (user != null) _QuickActions(userId: user['id'] as int),
+                  if (user != null)
+                    _QuickActions(userId: user['id'] as int),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                    child: Card(
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.perm_media_outlined),
+                            title: const Text('Shared media'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    SharedMediaPage(chat: widget.chat),
+                              ),
+                            ),
+                          ),
+                          if (user == null)
+                            ListTile(
+                              leading: const Icon(Icons.group_outlined),
+                              title: const Text('Members'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      GroupMembersPage(chat: widget.chat),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                   if (phoneValue != null || username != null)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -208,33 +274,65 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
   }
 }
 
-/// Call and add-contact actions for a private chat.
+/// Call and secret-chat actions for a private chat.
 class _QuickActions extends StatelessWidget {
   const _QuickActions({required this.userId});
 
   final int userId;
 
+  /// Opens an end-to-end encrypted chat with the same person.
+  ///
+  /// A secret chat is a separate chat from the ordinary one, so this pushes
+  /// the new chat rather than changing the current screen.
+  Future<void> _startSecretChat(BuildContext context) async {
+    final chat = await TDLibClient.createNewSecretChat(userId: userId);
+    if (!context.mounted) return;
+    if (chat == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not start a secret chat')),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: FilledButton.tonalIcon(
-              onPressed: () =>
-                  callService.startCall(userId: userId, isVideo: false),
-              icon: const Icon(Icons.call),
-              label: const Text('Call'),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: () =>
+                      callService.startCall(userId: userId, isVideo: false),
+                  icon: const Icon(Icons.call),
+                  label: const Text('Call'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: () =>
+                      callService.startCall(userId: userId, isVideo: true),
+                  icon: const Icon(Icons.videocam),
+                  label: const Text('Video'),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
             child: FilledButton.tonalIcon(
-              onPressed: () =>
-                  callService.startCall(userId: userId, isVideo: true),
-              icon: const Icon(Icons.videocam),
-              label: const Text('Video'),
+              onPressed: () => _startSecretChat(context),
+              icon: const Icon(Icons.lock_outline),
+              label: const Text('Start secret chat'),
             ),
           ),
         ],

@@ -23,20 +23,24 @@ where the focus is on **simplicity, and functionality** - not monetization.
 **Chats**
 - Chat list with folders, archive, pinning, muting, mark as read/unread
 - Unread counters, mention badges, draft previews, delivery/read ticks
-- Live typing indicators and connection status
+- Live typing indicators, connection status, unread divider in history
 
 **Messages**
 - Text with MarkdownV2 formatting, spoilers, tappable links and mentions
 - Replies with quoted preview, forwarding, editing, pinning, reactions
 - Multi-select for bulk copy / forward / delete (for me or for everyone)
-- Sending photos, albums, videos, documents and polls
-- Rendering GIFs, contacts, locations, venues and dice
+- Sending photos, albums, videos, documents, polls and contacts
 - Voice messages: hold to record, slide to cancel, real waveforms
-- Stickers, including animated (TGS) playback
-- Per-chat message search and jump-to-message
+- Round video messages, and fullscreen playback for every video
+- Stickers, including animated (TGS), plus saved GIFs
+- Silent send, "send when online" and scheduled messages
+- Bot inline keyboards, including callback buttons
+- Per-chat message search, shared-media browser, jump-to-message
 
 **People and groups**
 - Contacts, group and channel creation, invite links, join by link
+- Member lists with promote, dismiss and remove; group name, photo, about
+- Secret (end-to-end encrypted) chats
 - Profiles with bio, username, phone, shared actions and blocking
 - Global search across chats, public chats and message text
 
@@ -45,21 +49,18 @@ where the focus is on **simplicity, and functionality** - not monetization.
 
 **Settings**
 - Material You theming, light/dark/AMOLED
-- Notification defaults per chat scope, blocked users, active devices,
-  storage usage and cache clearing
+- Notification defaults per chat scope, blocked users, two-step
+  verification, active devices, storage usage and cache clearing
 
 ---
 
 ## 📝 Not implemented yet
 - [ ] Multi-account support
-- [ ] Video messages (round notes)
-- [ ] Secret chat UI
-- [ ] Shared media gallery in profiles
-- [ ] Group member and admin management
-- [ ] Scheduled and silent messages
 - [ ] Live location sharing
 - [ ] Custom chat wallpapers
-- [ ] Two-step verification setup
+- [ ] Channel comment threads
+- [ ] Inline bot queries (`@bot query`)
+- [ ] Stories
 
 ---
 

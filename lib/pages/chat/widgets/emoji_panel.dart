@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'sticker_image.dart';
 
@@ -12,6 +16,7 @@ class EmojiPanel extends StatefulWidget {
     super.key,
     required this.onEmoji,
     required this.onSticker,
+    required this.onGif,
     required this.onBackspace,
   });
 
@@ -20,6 +25,9 @@ class EmojiPanel extends StatefulWidget {
 
   /// Called with the file id of the sticker to send.
   final void Function(int fileId) onSticker;
+
+  /// Called with the file id of the saved GIF to send.
+  final void Function(int fileId) onGif;
 
   /// Called when the panel's backspace key is pressed.
   final VoidCallback onBackspace;
@@ -33,7 +41,7 @@ class _EmojiPanelState extends State<EmojiPanel>
   static const double _height = 280;
 
   late final TabController _tabController =
-      TabController(length: 2, vsync: this);
+      TabController(length: 3, vsync: this);
 
   @override
   void dispose() {
@@ -58,6 +66,7 @@ class _EmojiPanelState extends State<EmojiPanel>
             tabs: const [
               Tab(icon: Icon(Icons.emoji_emotions_outlined), height: 40),
               Tab(icon: Icon(Icons.auto_awesome_outlined), height: 40),
+              Tab(icon: Icon(Icons.gif_box_outlined), height: 40),
             ],
           ),
           Expanded(
@@ -69,6 +78,7 @@ class _EmojiPanelState extends State<EmojiPanel>
                   onBackspace: widget.onBackspace,
                 ),
                 _StickerGrid(onSticker: widget.onSticker),
+                _GifGrid(onGif: widget.onGif),
               ],
             ),
           ),
@@ -227,6 +237,151 @@ class _StickerGridState extends State<_StickerGrid> {
           },
         );
       },
+    );
+  }
+}
+
+/// A grid of the user's saved GIFs.
+class _GifGrid extends StatefulWidget {
+  const _GifGrid({required this.onGif});
+
+  final void Function(int fileId) onGif;
+
+  @override
+  State<_GifGrid> createState() => _GifGridState();
+}
+
+class _GifGridState extends State<_GifGrid> {
+  final ValueNotifier<List<Map<String, dynamic>>> _animations =
+      ValueNotifier(const []);
+  final ValueNotifier<bool> _isLoading = ValueNotifier(true);
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _animations.dispose();
+    _isLoading.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final animations = await TDLibClient.getSavedAnimations();
+    if (!mounted) return;
+    _animations.value = animations;
+    _isLoading.value = false;
+
+    // Only the thumbnails are fetched here; the GIF itself is sent by file id
+    // and never has to reach this device.
+    for (final animation in animations) {
+      final thumbnailId = animation['thumbnail']?['file']?['id'] as int?;
+      if (thumbnailId != null) {
+        TDLibClient.downloadFile(fileId: thumbnailId).catchError((_) {});
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<Map<String, dynamic>>>(
+      valueListenable: _animations,
+      builder: (context, animations, child) {
+        if (animations.isEmpty) {
+          return ValueListenableBuilder<bool>(
+            valueListenable: _isLoading,
+            builder: (context, isLoading, child) => Center(
+              child: isLoading
+                  ? const CircularProgressIndicator()
+                  : Text(
+                      'No saved GIFs',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+            ),
+          );
+        }
+
+        return GridView.builder(
+          padding: const EdgeInsets.all(4),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 120,
+            crossAxisSpacing: 4,
+            mainAxisSpacing: 4,
+          ),
+          itemCount: animations.length,
+          itemBuilder: (context, index) => _GifTile(
+            animation: animations[index],
+            onTap: () {
+              final fileId = animations[index]['animation']?['id'] as int?;
+              if (fileId != null) widget.onGif(fileId);
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// One saved GIF, drawn as its static thumbnail.
+class _GifTile extends StatefulWidget {
+  const _GifTile({required this.animation, required this.onTap});
+
+  final Map<String, dynamic> animation;
+  final VoidCallback onTap;
+
+  @override
+  State<_GifTile> createState() => _GifTileState();
+}
+
+class _GifTileState extends State<_GifTile> {
+  StreamSubscription<Map<String, dynamic>>? _fileSubscription;
+
+  int? get _thumbnailId =>
+      widget.animation['thumbnail']?['file']?['id'] as int?;
+
+  @override
+  void initState() {
+    super.initState();
+    _fileSubscription = TDLibClient.filesUpdates.listen((update) {
+      if (update['@type'] != updateFileConst) return;
+      final file = update['file'];
+      if (file['id'] != _thumbnailId || !mounted) return;
+      widget.animation['thumbnail']['file'] = file;
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _fileSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final local = widget.animation['thumbnail']?['file']?['local'];
+    final path = local?['isDownloadingCompleted'] == true
+        ? local['path'] as String?
+        : null;
+
+    return InkWell(
+      onTap: widget.onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: path == null || path.isEmpty
+            ? ColoredBox(
+                color: scheme.surfaceContainerHighest,
+                child: Icon(
+                  Icons.gif_box_outlined,
+                  color: scheme.onSurfaceVariant,
+                ),
+              )
+            : Image.file(File(path), fit: BoxFit.cover),
+      ),
     );
   }
 }
