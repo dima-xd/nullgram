@@ -1,186 +1,148 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:nullgram/services/avatar_cache.dart';
+import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/theme/app_theme.dart';
 
-class ChatAvatar extends StatelessWidget {
+/// A chat's round avatar: its photo when downloaded, its blurred
+/// minithumbnail while the photo is still on its way, and a colored initial
+/// when the chat has no photo at all.
+class ChatAvatar extends StatefulWidget {
   final Map<String, dynamic> chat;
   final double radius;
-  final Map<String, bool>? fileExistsCache;
-  final Map<String, Uint8List?>? miniThumbnailCache;
 
   const ChatAvatar({
     super.key,
     required this.chat,
     this.radius = 20,
-    this.fileExistsCache,
-    this.miniThumbnailCache,
   });
 
   @override
+  State<ChatAvatar> createState() => _ChatAvatarState();
+}
+
+class _ChatAvatarState extends State<ChatAvatar> {
+  @override
   Widget build(BuildContext context) {
-    Widget avatarWidget = _buildAvatarWidget(context);
+    final avatar = _buildAvatar(context);
+    final statusIcon = _statusIcon(context);
+    if (statusIcon == null) return avatar;
 
-    Widget? statusIcon = _getStatusIcon(context);
-    
-    if (statusIcon != null) {
-      return Stack(
-        children: [
-          avatarWidget,
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Container(
-              width: radius * 0.6,
-              height: radius * 0.6,
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.surface,
-                  width: 1,
-                ),
-              ),
-              child: statusIcon,
-            ),
-          ),
-        ],
-      );
-    }
-
-    return avatarWidget;
-  }
-
-  Widget _buildAvatarWidget(BuildContext context) {
-    final photo = chat['photo'];
-    final chatId = chat['id'] ?? 0;
-
-    if (photo == null || photo['small'] == null) {
-      return _buildDefaultAvatar(context, chatId);
-    }
-
-    final path = photo['small']?['local']?['path'];
-    final minithumbnail = photo['minithumbnail'];
-
-    if (path == null || path.isEmpty) {
-      return _buildDefaultAvatar(context, chatId);
-    }
-
-    if (fileExistsCache != null && miniThumbnailCache != null) {
-      if (minithumbnail != null &&
-          minithumbnail['data'] != null &&
-          !miniThumbnailCache!.containsKey(path)) {
-        final bytes = (minithumbnail['data'] as List<dynamic>).cast<int>();
-        miniThumbnailCache![path] = Uint8List.fromList(bytes);
-      }
-
-      if (fileExistsCache!.containsKey(path)) {
-        final exists = fileExistsCache![path]!;
-
-        if (exists) {
-          final size = radius * 2;
-          return Container(
-            width: size,
-            height: size,
+    return Stack(
+      children: [
+        avatar,
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: Container(
+            width: widget.radius * 0.6,
+            height: widget.radius * 0.6,
             decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
               shape: BoxShape.circle,
-              image: DecorationImage(
-                image: FileImage(File(path)),
-                fit: BoxFit.cover,
+              border: Border.all(
+                color: Theme.of(context).colorScheme.surface,
               ),
             ),
-          );
-        } else {
-          final cachedThumb = miniThumbnailCache![path];
-          if (cachedThumb != null) {
-            return CircleAvatar(
-              radius: radius,
-              backgroundImage: MemoryImage(cachedThumb),
-            );
-          }
-          return _buildPlaceholderAvatar(context);
-        }
-      }
-
-      _checkFileExists(path);
-
-      final cachedThumb = miniThumbnailCache![path];
-      if (cachedThumb != null) {
-        return CircleAvatar(
-          radius: radius,
-          backgroundImage: MemoryImage(cachedThumb),
-        );
-      }
-
-      return _buildPlaceholderAvatar(context);
-    } else {
-      return Container(
-        width: radius * 2,
-        height: radius * 2,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          image: DecorationImage(
-            image: FileImage(File(path)),
-            fit: BoxFit.cover,
-            filterQuality: FilterQuality.medium,
+            child: statusIcon,
           ),
         ),
-      );
-    }
+      ],
+    );
   }
 
-  Widget? _getStatusIcon(BuildContext context) {
-    if (chat['user']?['type']?['@type'] == 'UserTypeBot') {
+  Widget _buildAvatar(BuildContext context) {
+    final photo = widget.chat['photo'];
+    final path = photo?['small']?['local']?['path'] as String?;
+
+    if (path == null || path.isEmpty) return _defaultAvatar(context);
+
+    _cacheMiniThumbnail(photo, path);
+
+    final exists = AvatarCache.fileExists[path];
+    if (exists == null) {
+      // Not checked yet: show the best placeholder we have and rebuild once
+      // the check lands, so the real photo appears without waiting for an
+      // unrelated rebuild to happen to come along.
+      _checkFileExists(path);
+      return _thumbnailOrPlaceholder(context, path);
+    }
+    if (!exists) return _thumbnailOrPlaceholder(context, path);
+
+    final size = widget.radius * 2;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        image: DecorationImage(
+          image: FileImage(File(path)),
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+        ),
+      ),
+    );
+  }
+
+  void _cacheMiniThumbnail(dynamic photo, String path) {
+    if (AvatarCache.miniThumbnails.containsKey(path)) return;
+    AvatarCache.miniThumbnails[path] =
+        TdBytes.decode(photo?['minithumbnail']?['data']);
+  }
+
+  Widget _thumbnailOrPlaceholder(BuildContext context, String path) {
+    final thumbnail = AvatarCache.miniThumbnails[path];
+    if (thumbnail != null) {
+      return CircleAvatar(
+        radius: widget.radius,
+        backgroundImage: MemoryImage(thumbnail),
+      );
+    }
+    return _defaultAvatar(context);
+  }
+
+  Widget? _statusIcon(BuildContext context) {
+    final user = widget.chat['user'];
+    if (user?['type']?['@type'] == 'UserTypeBot') {
       return Icon(
         Icons.smart_toy,
-        size: radius * 0.4,
+        size: widget.radius * 0.4,
         color: Theme.of(context).colorScheme.primary,
       );
     }
-    
-    if (chat['user']?['status']?['@type'] == 'UserStatusOnline') {
+    if (user?['status']?['@type'] == 'UserStatusOnline') {
       return Icon(
         Icons.circle,
-        size: radius * 0.4,
+        size: widget.radius * 0.4,
         color: context.chatColors.onlineDot,
       );
     }
-    
     return null;
   }
 
-  Widget _buildDefaultAvatar(BuildContext context, int chatId) {
-    final title = chat['title'] ?? '';
+  Widget _defaultAvatar(BuildContext context) {
+    final chatId = widget.chat['id'] as int? ?? 0;
+    final title = widget.chat['title'] as String? ?? '';
     final firstLetter = title.isNotEmpty ? title[0].toUpperCase() : '?';
     final colors = context.chatColors.avatarColors(chatId);
 
     return CircleAvatar(
-      radius: radius,
+      radius: widget.radius,
       backgroundColor: colors.background,
       child: Text(
         firstLetter,
         style: TextStyle(
           color: colors.foreground,
-          fontSize: radius * 0.7,
+          fontSize: widget.radius * 0.7,
           fontWeight: FontWeight.bold,
         ),
       ),
     );
   }
 
-  Widget _buildPlaceholderAvatar(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: scheme.surfaceContainerHighest,
-      child: Icon(Icons.person, color: scheme.onSurfaceVariant, size: radius),
-    );
-  }
-
   Future<void> _checkFileExists(String path) async {
-    if (fileExistsCache == null || fileExistsCache!.containsKey(path)) return;
-
     final exists = await File(path).exists();
-    fileExistsCache![path] = exists;
+    AvatarCache.fileExists[path] = exists;
+    if (mounted && exists) setState(() {});
   }
 }

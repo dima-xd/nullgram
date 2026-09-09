@@ -3,11 +3,13 @@ import 'dart:ui';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
+import 'package:nullgram/app_info.dart';
 import 'package:nullgram/theme/app_theme.dart';
 import 'package:nullgram/pages/auth/code_input_page.dart';
 import 'package:nullgram/pages/auth/login_page.dart';
 import 'package:nullgram/pages/auth/password_input_page.dart';
 import 'package:nullgram/pages/home/home_page.dart';
+import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/services/call_service.dart';
 import 'package:nullgram/pages/call/call_overlay.dart';
@@ -75,6 +77,11 @@ void main() async {
     _currentAuthState = authType;
 
     switch (authType) {
+      case 'AuthorizationStateClosed':
+      case 'AuthorizationStateLoggingOut':
+        // Drop the signed-in user's chats so the next account never sees
+        // them, even briefly.
+        ChatStore.instance.reset();
       case 'AuthorizationStateWaitPhoneNumber':
         _postFrame(() => _resetTo(const LoginPage()));
       case 'AuthorizationStateWaitOtherDeviceConfirmation':
@@ -105,6 +112,7 @@ void main() async {
             ));
       case 'AuthorizationStateReady':
         NotificationService.instance.start();
+        ChatStore.instance.start();
         _postFrame(() {
           _resetTo(const HomePage());
           NotificationService.instance.requestPermission();
@@ -130,9 +138,8 @@ void main() async {
     apiHash: dotenv.env["API_HASH"]!,
     systemLanguageCode: PlatformDispatcher.instance.locale.languageCode,
     deviceModel: androidInfo.model,
-    systemVersion: '',
-    // TODO: Replace with actual app version
-    applicationVersion: '0.1',
+    systemVersion: androidInfo.version.release,
+    applicationVersion: appVersion,
   );
 
   runApp(MyApp());

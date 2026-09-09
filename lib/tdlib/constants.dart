@@ -22,3 +22,17 @@ const String updateChatActionConst = 'UpdateChatAction';
 
 const String updateCallConst = 'UpdateCall';
 const String updateNewCallSignalingDataConst = 'UpdateNewCallSignalingData';
+const String updateConnectionStateConst = 'UpdateConnectionState';
+const String updateChatTitleConst = 'UpdateChatTitle';
+const String updateChatPhotoConst = 'UpdateChatPhoto';
+const String updateChatNotificationSettingsConst =
+    'UpdateChatNotificationSettings';
+const String updateChatIsMarkedAsUnreadConst = 'UpdateChatIsMarkedAsUnread';
+const String updateChatDraftMessageConst = 'UpdateChatDraftMessage';
+const String updateChatUnreadMentionCountConst =
+    'UpdateChatUnreadMentionCount';
+const String updateChatPermissionsConst = 'UpdateChatPermissions';
+const String updateBasicGroupConst = 'UpdateBasicGroup';
+const String updateMessageSendSucceededConst = 'UpdateMessageSendSucceeded';
+const String updateMessageSendFailedConst = 'UpdateMessageSendFailed';
+const String updateMessageIsPinnedConst = 'UpdateMessageIsPinned';

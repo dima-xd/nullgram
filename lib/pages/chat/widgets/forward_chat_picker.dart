@@ -1,7 +1,6 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
-import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 
 /// Presents a bottom sheet listing the user's chats and resolves to the chat
@@ -27,28 +26,13 @@ class _ForwardChatPickerState extends State<_ForwardChatPicker> {
   final ValueNotifier<String> _filter = ValueNotifier('');
   final SearchController _searchController = SearchController();
 
-  // ChatListItem needs these caches; an empty pair just disables avatar
-  // caching for the picker, which is fine for a short-lived sheet.
-  final Map<String, bool> _fileExistsCache = {};
-  final Map<String, Uint8List?> _miniThumbnailCache = {};
-
   @override
   void initState() {
     super.initState();
-    _loadChats();
-  }
-
-  Future<void> _loadChats() async {
-    final chatIds = await TDLibClient.getChats();
-    // Resolve all chats concurrently while preserving the load ordering.
-    final resolved = await Future.wait(
-      chatIds.map((id) => TDLibClient.getChat(chatId: id)),
-    );
-    if (!mounted) return;
-    _chats.value = [
-      for (final chat in resolved)
-        if (chat != null) chat,
-    ];
+    // The store already holds every chat in list order, so the picker opens
+    // instantly instead of re-resolving each chat over the bridge.
+    _chats.value =
+        ChatStore.instance.visibleChats(kind: ChatListKind.main);
     _isLoading.value = false;
   }
 
@@ -130,9 +114,6 @@ class _ForwardChatPickerState extends State<_ForwardChatPicker> {
                             itemCount: visible.length,
                             itemBuilder: (context, index) => ChatListItem(
                               chat: visible[index],
-                              currentFolderId: null,
-                              fileExistsCache: _fileExistsCache,
-                              miniThumbnailCache: _miniThumbnailCache,
                               onTap: (chatId) =>
                                   Navigator.of(context).pop(chatId),
                               highlightQuery: filter,

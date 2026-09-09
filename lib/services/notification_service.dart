@@ -1,9 +1,12 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:logger/logger.dart';
 import 'package:nullgram/main.dart';
 import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
+import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
@@ -32,6 +35,13 @@ class NotificationService {
   /// Set by [ChatPage] while it is mounted.
   int? activeChatId;
 
+  AndroidFlutterLocalNotificationsPlugin? _android;
+
+  /// Whether each notification scope is muted by default, cached after the
+  /// first lookup. A scope default rarely changes and would otherwise cost a
+  /// bridge round trip per incoming message.
+  final Map<String, bool> _scopeMuted = {};
+
   /// Initializes the plugin, the Android notification channel, and runtime
   /// permission. Safe to call more than once.
   Future<void> init() async {
@@ -55,8 +65,6 @@ class NotificationService {
     );
     _log.i('NotificationService initialized');
   }
-
-  AndroidFlutterLocalNotificationsPlugin? _android;
 
   /// Requests the runtime notification permission. Call once a foreground
   /// activity exists (Android 13+ shows no dialog when called too early).
@@ -83,23 +91,59 @@ class NotificationService {
       final chatId = message['chatId'] as int?;
       if (chatId == null || chatId == activeChatId) return;
 
-      final chat = await TDLibClient.getChat(chatId: chatId);
+      final chat = ChatStore.instance.chat(chatId) ??
+          await TDLibClient.getChat(chatId: chatId);
       if (chat == null) {
-        _log.w('Notification skipped: getChat($chatId) returned null');
+        _log.w('Notification skipped: chat $chatId is unknown');
         return;
       }
 
-      final muteFor = chat['notificationSettings']?['muteFor'] as int? ?? 0;
-      if (muteFor > 0) return;
+      if (await _isMuted(chat)) return;
 
       final title = chat['title'] as String? ?? 'New message';
-      final body = await _buildBody(message, chat);
-
-      await _show(chatId: chatId, title: title, body: body);
-      _log.i('Notification shown for chat $chatId: $title — $body');
+      await _show(
+        chatId: chatId,
+        title: title,
+        body: await _buildBody(message, chat),
+      );
     } catch (e, s) {
       _log.e('Failed to show notification', error: e, stackTrace: s);
     }
+  }
+
+  /// Whether the chat should stay silent.
+  ///
+  /// A chat can be muted on its own, or inherit the mute state of its scope
+  /// (private chats / groups / channels) — TDLib signals the latter with
+  /// `useDefaultMuteFor`, in which case its own `muteFor` is meaningless.
+  Future<bool> _isMuted(Map<String, dynamic> chat) async {
+    final settings = chat['notificationSettings'];
+    if (settings?['useDefaultMuteFor'] != true) {
+      return (settings?['muteFor'] as int? ?? 0) > 0;
+    }
+
+    final scope = _scopeOf(chat);
+    final cached = _scopeMuted[scope];
+    if (cached != null) return cached;
+
+    final defaults = await TDLibClient.getScopeNotificationSettings(
+      scope: scope,
+    );
+    final muted = (defaults?['muteFor'] as int? ?? 0) > 0;
+    _scopeMuted[scope] = muted;
+    return muted;
+  }
+
+  /// The TDLib notification scope a chat belongs to.
+  String _scopeOf(Map<String, dynamic> chat) {
+    final type = chat['type']?['@type'];
+    if (type == 'ChatTypeSupergroup' && chat['type']?['isChannel'] == true) {
+      return 'notificationSettingsScopeChannelChats';
+    }
+    if (type == 'ChatTypeBasicGroup' || type == 'ChatTypeSupergroup') {
+      return 'notificationSettingsScopeGroupChats';
+    }
+    return 'notificationSettingsScopePrivateChats';
   }
 
   /// Builds the notification body, prefixing the sender name in group chats.
@@ -107,7 +151,7 @@ class NotificationService {
     Map<String, dynamic> message,
     Map<String, dynamic> chat,
   ) async {
-    final preview = _preview(message['content'] as Map<String, dynamic>?);
+    final preview = messagePreviewText(message);
 
     final chatType = chat['type']?['@type'];
     final isGroup = chatType == 'ChatTypeBasicGroup' ||
@@ -129,7 +173,8 @@ class NotificationService {
         final user = await TDLibClient.getUser(userId: userId);
         if (user == null) return null;
         return [user['firstName'], user['lastName']]
-            .where((p) => p != null && p.toString().isNotEmpty)
+            .whereType<String>()
+            .where((part) => part.isNotEmpty)
             .join(' ');
       case 'MessageSenderChat':
         final senderChatId = senderId['chatId'] as int?;
@@ -138,32 +183,6 @@ class NotificationService {
         return senderChat?['title'] as String?;
       default:
         return null;
-    }
-  }
-
-  /// A short human-readable preview for a message content.
-  String _preview(Map<String, dynamic>? content) {
-    switch (content?['@type']) {
-      case 'MessageText':
-        return content?['text']?['text'] as String? ?? '';
-      case 'MessagePhoto':
-        return '📷 Photo';
-      case 'MessageVideo':
-        return '🎥 Video';
-      case 'MessageVoiceNote':
-        return '🎤 Voice message';
-      case 'MessageAudio':
-        return '🎵 Audio';
-      case 'MessageDocument':
-        return '📎 Document';
-      case 'MessageSticker':
-        return '🎨 Sticker';
-      case 'MessageAnimation':
-        return '🎬 GIF';
-      case 'MessagePoll':
-        return '📊 Poll';
-      default:
-        return 'Message';
     }
   }
 
@@ -188,7 +207,12 @@ class NotificationService {
       notificationDetails: const NotificationDetails(android: androidDetails),
       payload: '$chatId',
     );
+    _log.i('Notification shown for chat $chatId: $title — $body');
   }
+
+  /// Clears the notification for [chatId], used once its messages are read.
+  Future<void> clear(int chatId) =>
+      _plugin.cancel(id: chatId.hashCode & 0x7fffffff);
 
   void _onTap(NotificationResponse response) {
     final chatId = int.tryParse(response.payload ?? '');
@@ -196,7 +220,8 @@ class NotificationService {
   }
 
   Future<void> _openChat(int chatId) async {
-    final chat = await TDLibClient.getChat(chatId: chatId);
+    final chat = ChatStore.instance.chat(chatId) ??
+        await TDLibClient.getChat(chatId: chatId);
     if (chat == null) return;
     navigatorKey.currentState?.push(
       MaterialPageRoute(builder: (_) => ChatPage(chat: chat)),

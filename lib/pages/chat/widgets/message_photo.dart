@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/constants.dart';
+import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
 import 'image_details.dart';
@@ -97,14 +98,8 @@ class _MessagePhotoState extends State<MessagePhoto> {
     return sizes.last;
   }
 
-  List<int>? _getMiniThumbnailBytes() {
-    final photo = widget.content['photo'];
-    final data = photo['minithumbnail']?['data'];
-    if (data is List) {
-      return data.cast<int>();
-    }
-    return null;
-  }
+  List<int>? _getMiniThumbnailBytes() =>
+      TdBytes.decode(widget.content['photo']?['minithumbnail']?['data']);
 
   String? _getCaption() {
     final text = widget.content['caption']?['text'];

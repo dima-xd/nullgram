@@ -70,7 +70,11 @@ class _AlbumBubbleState extends State<AlbumBubble> {
       case 'MessageVideo':
         return MessageVideo(content: content);
       case 'MessageAudio':
-        return MessageAudio(content: content);
+        return MessageAudio(
+          content: content,
+          chatId: widget.chat['id'] as int,
+          messageId: messageId,
+        );
       default:
         return const SizedBox.shrink();
     }

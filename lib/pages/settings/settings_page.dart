@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/app_info.dart';
 import 'package:nullgram/main.dart' show themeModeNotifier, amoledNotifier;
+import 'package:nullgram/pages/settings/notifications_page.dart';
+import 'package:nullgram/pages/settings/privacy_page.dart';
+import 'package:nullgram/pages/settings/sessions_page.dart';
+import 'package:nullgram/pages/settings/storage_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
-/// App settings: theme selection and account sign-out.
+/// The settings hub: appearance, notifications, privacy, storage and account.
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -11,9 +16,9 @@ class SettingsPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.only(bottom: 24),
         children: [
-          const _SectionHeader('Theme'),
+          const _SectionHeader('Appearance'),
           const _ThemeModeSelector(),
           ValueListenableBuilder<ThemeMode>(
             valueListenable: themeModeNotifier,
@@ -34,9 +39,38 @@ class SettingsPage extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 16),
+          const _SectionHeader('Preferences'),
+          _NavigationTile(
+            icon: Icons.notifications_outlined,
+            title: 'Notifications and sounds',
+            page: () => const NotificationsPage(),
+          ),
+          _NavigationTile(
+            icon: Icons.lock_outline,
+            title: 'Privacy and security',
+            page: () => const PrivacyPage(),
+          ),
+          _NavigationTile(
+            icon: Icons.devices_outlined,
+            title: 'Devices',
+            page: () => const SessionsPage(),
+          ),
+          _NavigationTile(
+            icon: Icons.storage_outlined,
+            title: 'Data and storage',
+            page: () => const StoragePage(),
+          ),
           const _SectionHeader('Account'),
           const _LogoutTile(),
+          const SizedBox(height: 16),
+          Center(
+            child: Text(
+              'Nullgram $appVersion',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ),
         ],
       ),
     );
@@ -53,11 +87,37 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
       child: Text(
         title,
         style: theme.textTheme.titleSmall
             ?.copyWith(color: theme.colorScheme.primary),
+      ),
+    );
+  }
+}
+
+/// A row that pushes a settings subpage.
+class _NavigationTile extends StatelessWidget {
+  const _NavigationTile({
+    required this.icon,
+    required this.title,
+    required this.page,
+  });
+
+  final IconData icon;
+  final String title;
+  final Widget Function() page;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => page()),
       ),
     );
   }

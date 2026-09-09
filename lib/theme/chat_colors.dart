@@ -118,6 +118,21 @@ class ChatColors extends ThemeExtension<ChatColors> {
     return [for (var i = 0; i < a.length; i++) Color.lerp(a[i], b[i], t)!];
   }
 
+  /// The colour of a group message's sender name for [seed] (its user id).
+  ///
+  /// Shares the avatar palette so a person's name matches their avatar, but
+  /// pushes the lightness into a band that stays legible on a bubble fill: the
+  /// palette entries are tuned as backgrounds for white text, which is too
+  /// dark to read on a dark bubble.
+  Color senderNameColor(int seed, Brightness brightness) {
+    final base = avatarPalette[seed.abs() % avatarPalette.length];
+    final hsl = HSLColor.fromColor(base);
+    final lightness = brightness == Brightness.dark
+        ? hsl.lightness.clamp(0.68, 1.0)
+        : hsl.lightness.clamp(0.0, 0.42);
+    return hsl.withLightness(lightness).toColor();
+  }
+
   /// The avatar background for [seed] (e.g. a chat id), and a legible on-color.
   ({Color background, Color foreground}) avatarColors(int seed) {
     final background = avatarPalette[seed.abs() % avatarPalette.length];

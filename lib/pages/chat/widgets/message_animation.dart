@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/constants.dart';
+import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/theme/motion.dart';
 import 'package:video_player/video_player.dart';
@@ -81,10 +82,8 @@ class _MessageAnimationState extends State<MessageAnimation> {
 
   String? _thumbnailPath() => _localPath(_animation['thumbnail']?['file']);
 
-  List<int>? _miniThumbnailBytes() {
-    final data = _animation['minithumbnail']?['data'];
-    return data is List ? data.cast<int>() : null;
-  }
+  List<int>? _miniThumbnailBytes() =>
+      TdBytes.decode(_animation['minithumbnail']?['data']);
 
   /// Initializes the looped, muted player once the file is on disk.
   Future<void> _maybeInitVideo() async {

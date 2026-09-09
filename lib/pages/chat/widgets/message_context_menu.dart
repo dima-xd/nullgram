@@ -3,7 +3,16 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:nullgram/theme/motion.dart';
 
 /// Actions offered by the message context menu.
-enum MessageMenuAction { reply, edit, copy, forward, pin, unpin, delete }
+enum MessageMenuAction {
+  reply,
+  edit,
+  copy,
+  forward,
+  select,
+  pin,
+  unpin,
+  delete,
+}
 
 /// The outcome of a message long-press.
 ///
@@ -202,6 +211,13 @@ class _MenuList extends StatelessWidget {
               label: 'Forward',
               onTap: () => Navigator.of(context).pop(
                   const MessageMenuResult.action(MessageMenuAction.forward)),
+            ),
+
+            _MenuItem(
+              icon: Icons.checklist,
+              label: 'Select',
+              onTap: () => Navigator.of(context).pop(
+                  const MessageMenuResult.action(MessageMenuAction.select)),
             ),
             if (canPin)
               _MenuItem(

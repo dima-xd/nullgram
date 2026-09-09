@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:logger/logger.dart';
 import 'package:nullgram/tdlib/models/message.dart';
+import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:rxdart/rxdart.dart';
 
 import 'constants.dart';
@@ -30,6 +31,18 @@ class TDLibClient {
   // a PublishSubject (broadcast, no buffer) unlike chat/file streams.
   static final _callController = PublishSubject<Map<String, dynamic>>();
   static Stream<Map<String, dynamic>> get callUpdates => _callController.stream;
+
+  // Seeded with "ready" so a late listener (any screen built after the first
+  // update arrived) renders a connected app instead of a stuck banner.
+  static final _connectionStateController =
+      BehaviorSubject<String>.seeded('ConnectionStateReady');
+
+  /// The current TDLib connection state, as a `ConnectionState*` type name.
+  ///
+  /// Emits the latest value immediately on subscription, so the header banner
+  /// is correct as soon as it is built.
+  static Stream<String> get connectionStateUpdates =>
+      _connectionStateController.stream;
 
   static Future<void> sendMessage({
     required int chatId,
@@ -969,14 +982,23 @@ class TDLibClient {
       switch (type) {
         case updateAuthorizationStateConst:
           _authUpdatesController.add(update['authorizationState']);
+        case updateConnectionStateConst:
+          _connectionStateController.add(
+            update['state']?['@type'] as String? ?? '',
+          );
         case updateChatFoldersConst || updateNewChatConst || updateChatPositionConst ||
           updateChatLastMessageConst || updateChatAddedToListConst || updateSupergroupFullInfoConst ||
           updateSupergroupConst || updateChatReadInboxConst || updateUserConst ||
-          updateChatReadOutboxConst || updateChatActionConst || updateUserStatusConst:
+          updateChatReadOutboxConst || updateChatActionConst || updateUserStatusConst ||
+          updateChatTitleConst || updateChatPhotoConst || updateBasicGroupConst ||
+          updateChatNotificationSettingsConst || updateChatPermissionsConst ||
+          updateChatIsMarkedAsUnreadConst || updateChatDraftMessageConst ||
+          updateChatUnreadMentionCountConst:
           _chatUpdatesController.add(update);
         case updateNewMessageConst || updateDeleteMessagesConst ||
           updateMessageInteractionInfoConst || updateMessageContentConst ||
-          updateMessageEditedConst:
+          updateMessageEditedConst || updateMessageIsPinnedConst ||
+          updateMessageSendSucceededConst || updateMessageSendFailedConst:
           _messagesController.add(update);
         case updateFileConst:
           _filesController.add(update);
@@ -987,4 +1009,752 @@ class TDLibClient {
       }
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // Generic request plumbing
+  //
+  // Everything below is built on these helpers rather than repeating the
+  // encode/invoke/decode dance. A TDLib error arrives as a payload without a
+  // `data` key, which the helpers treat as "no result".
+  // ---------------------------------------------------------------------------
+
+  /// Sends [request] to TDLib and returns its decoded result.
+  ///
+  /// Returns null when TDLib answered with an error or the bridge produced no
+  /// payload, so a caller can treat failure as "nothing came back" instead of
+  /// having to catch.
+  static Future<Map<String, dynamic>?> _request(
+    Map<String, dynamic> request,
+  ) async {
+    final dynamic result;
+    try {
+      result = await _channel.invokeMethod(
+        'send',
+        {'json': jsonEncode(request)},
+      );
+    } catch (e) {
+      logger.e('TDLib ${request['@type']} failed', error: e);
+      return null;
+    }
+
+    if (result is! Map) return null;
+    final data = result['data'];
+    if (data == null) {
+      final message = result['message'];
+      if (message != null) {
+        logger.w('TDLib ${request['@type']} error: $message');
+      }
+      return null;
+    }
+    final decoded = data is String
+        ? jsonDecode(data) as Map<String, dynamic>
+        : data as Map<String, dynamic>;
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  /// Sends [request] and discards the result, for calls whose effect is only
+  /// observed through updates.
+  static Future<void> _execute(Map<String, dynamic> request) async {
+    await _request(request);
+  }
+
+  /// Reads a list of ids out of a TDLib `chats`/`users` style response.
+  static List<int> _idList(Map<String, dynamic>? data, String key) {
+    final ids = data?[key] as List?;
+    if (ids == null) return const [];
+    return ids.map((id) => (id as num).toInt()).toList();
+  }
+
+  /// Copies a TDLib response list into a list of plain maps.
+  static List<Map<String, dynamic>> _mapList(
+    Map<String, dynamic>? data,
+    String key,
+  ) {
+    final items = data?[key] as List?;
+    if (items == null) return const [];
+    return [
+      for (final item in items)
+        if (item != null) Map<String, dynamic>.from(item as Map),
+    ];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Messages
+  // ---------------------------------------------------------------------------
+
+  /// Fetches a single message, or null when it is no longer available.
+  ///
+  /// Used to resolve the message a reply points at: TDLib describes a reply
+  /// only as `replyTo.messageId`, never as the message itself.
+  static Future<Map<String, dynamic>?> getMessage({
+    required int chatId,
+    required int messageId,
+  }) =>
+      _request({
+        "@type": "getMessage",
+        "chatId": chatId,
+        "messageId": messageId,
+      });
+
+  /// Fetches several messages of one chat at once. Entries TDLib could not
+  /// resolve are dropped, so the result may be shorter than [messageIds].
+  static Future<List<Map<String, dynamic>>> getMessages({
+    required int chatId,
+    required List<int> messageIds,
+  }) async {
+    final data = await _request({
+      "@type": "getMessages",
+      "chatId": chatId,
+      "messageIds": messageIds,
+    });
+    return _mapList(data, 'messages');
+  }
+
+  /// Sends a recorded voice message.
+  ///
+  /// [duration] is in seconds and [waveform] holds 5-bit amplitude samples
+  /// packed most-significant-bit first, exactly as TDLib stores them; pass an
+  /// empty list when no amplitudes were captured.
+  static Future<void> sendVoiceNote({
+    required int chatId,
+    required String path,
+    required int duration,
+    List<int> waveform = const [],
+    String caption = '',
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "sendMessage",
+        "chatId": chatId,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        "inputMessageContent": {
+          "@type": "inputMessageVoiceNote",
+          "voiceNote": {"@type": "inputFileLocal", "path": path},
+          "duration": duration,
+          "waveform": TdBytes.encode(waveform),
+          if (caption.isNotEmpty)
+            "caption": {"@type": "formattedText", "text": caption},
+        },
+      });
+
+  /// Sends several photos or videos as one album.
+  ///
+  /// Telegram groups an album into a single bubble, which only happens when the
+  /// items are sent together in one request — sending them one by one produces
+  /// separate messages instead.
+  static Future<void> sendMediaAlbum({
+    required int chatId,
+    required List<({String path, bool isVideo})> items,
+    String caption = '',
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "sendMessageAlbum",
+        "chatId": chatId,
+        "messageThreadId": 0,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        "inputMessageContents": [
+          for (final (index, item) in items.indexed)
+            {
+              "@type":
+                  item.isVideo ? "inputMessageVideo" : "inputMessagePhoto",
+              if (item.isVideo)
+                "video": {"@type": "inputFileLocal", "path": item.path}
+              else
+                "photo": {"@type": "inputFileLocal", "path": item.path},
+              "width": 0,
+              "height": 0,
+              if (item.isVideo) ...{
+                "duration": 0,
+                "supportsStreaming": true,
+              },
+              // Telegram shows one caption per album, taken from its first
+              // item; repeating it on every item would render it several times.
+              if (index == 0 && caption.isNotEmpty)
+                "caption": {"@type": "formattedText", "text": caption},
+            },
+        ],
+      });
+
+  /// Sends an already-uploaded sticker by its file id.
+  static Future<void> sendSticker({
+    required int chatId,
+    required int fileId,
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "sendMessage",
+        "chatId": chatId,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        "inputMessageContent": {
+          "@type": "inputMessageSticker",
+          "sticker": {"@type": "inputFileId", "id": fileId},
+          "width": 0,
+          "height": 0,
+          "emoji": "",
+        },
+      });
+
+  /// Shares a static geographic position.
+  static Future<void> sendLocation({
+    required int chatId,
+    required double latitude,
+    required double longitude,
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "sendMessage",
+        "chatId": chatId,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        "inputMessageContent": {
+          "@type": "inputMessageLocation",
+          "location": {
+            "@type": "location",
+            "latitude": latitude,
+            "longitude": longitude,
+            "horizontalAccuracy": 0,
+          },
+          "livePeriod": 0,
+          "heading": 0,
+          "proximityAlertRadius": 0,
+        },
+      });
+
+  /// Creates a poll message with [question] and at least two [options].
+  static Future<void> sendPoll({
+    required int chatId,
+    required String question,
+    required List<String> options,
+    bool isAnonymous = true,
+    bool allowMultipleAnswers = false,
+  }) =>
+      _execute({
+        "@type": "sendMessage",
+        "chatId": chatId,
+        "inputMessageContent": {
+          "@type": "inputMessagePoll",
+          "question": {"@type": "formattedText", "text": question},
+          "options": [
+            for (final option in options)
+              {"@type": "formattedText", "text": option},
+          ],
+          "isAnonymous": isAnonymous,
+          "type": {
+            "@type": "pollTypeRegular",
+            "allowMultipleAnswers": allowMultipleAnswers,
+          },
+          "openPeriod": 0,
+          "closeDate": 0,
+          "isClosed": false,
+        },
+      });
+
+  /// Marks a message's content as consumed: a voice note as listened to, a
+  /// self-destructing photo as opened.
+  static Future<void> openMessageContent({
+    required int chatId,
+    required int messageId,
+  }) =>
+      _execute({
+        "@type": "openMessageContent",
+        "chatId": chatId,
+        "messageId": messageId,
+      });
+
+  /// Returns a public `t.me` link to a message, or null when the chat has no
+  /// public link.
+  static Future<String?> getMessageLink({
+    required int chatId,
+    required int messageId,
+  }) async {
+    final data = await _request({
+      "@type": "getMessageLink",
+      "chatId": chatId,
+      "messageId": messageId,
+      "mediaTimestamp": 0,
+      "forAlbum": false,
+    });
+    return data?['link'] as String?;
+  }
+
+  /// Retries messages whose delivery failed.
+  static Future<void> resendMessages({
+    required int chatId,
+    required List<int> messageIds,
+  }) =>
+      _execute({
+        "@type": "resendMessages",
+        "chatId": chatId,
+        "messageIds": messageIds,
+      });
+
+  /// Stores the chat's unsent draft, or clears it when [text] is empty, so the
+  /// composer survives leaving the chat and syncs to other devices.
+  static Future<void> setChatDraftMessage({
+    required int chatId,
+    required String text,
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "setChatDraftMessage",
+        "chatId": chatId,
+        "messageThreadId": 0,
+        if (text.isNotEmpty)
+          "draftMessage": {
+            "@type": "draftMessage",
+            if (replyToMessageId != null)
+              "replyTo": {
+                "@type": "inputMessageReplyToMessage",
+                "messageId": replyToMessageId,
+              },
+            "date": DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            "inputMessageText": {
+              "@type": "inputMessageText",
+              "text": {"@type": "formattedText", "text": text},
+            },
+          },
+      });
+
+  // ---------------------------------------------------------------------------
+  // Chat list management
+  // ---------------------------------------------------------------------------
+
+  /// The TDLib chat list a request should act on.
+  static Map<String, dynamic> _chatListOf({bool archived = false}) => {
+        "@type": archived ? "chatListArchive" : "chatListMain",
+      };
+
+  /// Pins or unpins a chat at the top of its list.
+  static Future<void> toggleChatIsPinned({
+    required int chatId,
+    required bool isPinned,
+    bool archived = false,
+  }) =>
+      _execute({
+        "@type": "toggleChatIsPinned",
+        "chatList": _chatListOf(archived: archived),
+        "chatId": chatId,
+        "isPinned": isPinned,
+      });
+
+  /// Mutes a chat for [muteFor] seconds, or unmutes it when [muteFor] is 0.
+  ///
+  /// Telegram expresses "mute forever" as a very large value; see
+  /// [muteForever].
+  static Future<void> setChatNotificationSettings({
+    required int chatId,
+    required int muteFor,
+  }) =>
+      _execute({
+        "@type": "setChatNotificationSettings",
+        "chatId": chatId,
+        "notificationSettings": {
+          "@type": "chatNotificationSettings",
+          // Only the mute duration is overridden here. The bridge builds the
+          // settings object from scratch, so every other `useDefault*` flag
+          // has to be set explicitly or the chat would silently lose its
+          // inherited sound and preview settings.
+          "useDefaultMuteFor": false,
+          "muteFor": muteFor,
+          "useDefaultSound": true,
+          "useDefaultShowPreview": true,
+          "useDefaultMuteStories": true,
+          "useDefaultStorySound": true,
+          "useDefaultShowStoryPoster": true,
+          "useDefaultDisablePinnedMessageNotifications": true,
+          "useDefaultDisableMentionNotifications": true,
+        },
+      });
+
+  /// The `muteFor` value Telegram uses for an indefinite mute (about 10 years).
+  static const int muteForever = 367417600;
+
+  /// Flags a chat as unread even though its messages have been seen.
+  static Future<void> toggleChatIsMarkedAsUnread({
+    required int chatId,
+    required bool isMarkedAsUnread,
+  }) =>
+      _execute({
+        "@type": "toggleChatIsMarkedAsUnread",
+        "chatId": chatId,
+        "isMarkedAsUnread": isMarkedAsUnread,
+      });
+
+  /// Clears a chat's history.
+  ///
+  /// [removeFromChatList] also drops the chat from the list; [revoke] clears
+  /// the history for the other party too, where the chat allows it.
+  static Future<void> deleteChatHistory({
+    required int chatId,
+    bool removeFromChatList = false,
+    bool revoke = false,
+  }) =>
+      _execute({
+        "@type": "deleteChatHistory",
+        "chatId": chatId,
+        "removeFromChatList": removeFromChatList,
+        "revoke": revoke,
+      });
+
+  /// Deletes a chat along with all of its messages. Only the owner of a group
+  /// or channel can do this; private chats use [deleteChatHistory] instead.
+  static Future<void> deleteChat({required int chatId}) =>
+      _execute({"@type": "deleteChat", "chatId": chatId});
+
+  /// Leaves a group, supergroup or channel.
+  static Future<void> leaveChat({required int chatId}) =>
+      _execute({"@type": "leaveChat", "chatId": chatId});
+
+  /// Joins a public group or channel the user can already see.
+  static Future<void> joinChat({required int chatId}) =>
+      _execute({"@type": "joinChat", "chatId": chatId});
+
+  /// Moves a chat between the main and archived lists.
+  static Future<void> addChatToList({
+    required int chatId,
+    required bool archived,
+  }) =>
+      _execute({
+        "@type": "addChatToList",
+        "chatId": chatId,
+        "chatList": _chatListOf(archived: archived),
+      });
+
+  /// Asks TDLib to load the next slice of the archived chat list.
+  ///
+  /// Mirrors [loadChats] but for the archive, returning the response `@type`
+  /// ("Ok" while more chats remain, "Error" once the list is exhausted).
+  static Future<String?> loadArchivedChats({int limit = 20}) async {
+    final dynamic result;
+    try {
+      result = await _channel.invokeMethod('send', {
+        'json': jsonEncode({
+          "@type": "loadChats",
+          "chatList": _chatListOf(archived: true),
+          "limit": limit,
+        }),
+      });
+    } catch (_) {
+      return null;
+    }
+    if (result is! Map) return null;
+    return result['data'] == null ? "Error" : result['type'] as String?;
+  }
+
+  /// Returns the ids of the chats TDLib currently holds in the archive.
+  static Future<List<int>> getArchivedChats({int limit = 200}) async {
+    final data = await _request({
+      "@type": "getChats",
+      "chatList": _chatListOf(archived: true),
+      "limit": limit,
+    });
+    return _idList(data, 'chatIds');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Creating chats
+  // ---------------------------------------------------------------------------
+
+  /// Creates a group with [title] and the given members, returning the new
+  /// chat or null when creation failed.
+  static Future<Map<String, dynamic>?> createNewBasicGroupChat({
+    required String title,
+    required List<int> userIds,
+  }) async {
+    final data = await _request({
+      "@type": "createNewBasicGroupChat",
+      "userIds": userIds,
+      "title": title,
+      "messageAutoDeleteTime": 0,
+    });
+    // Newer TDLib versions answer with a `createdBasicGroupChat` wrapper
+    // around the chat instead of the chat itself.
+    final chat = data?['chat'];
+    if (chat is Map) return Map<String, dynamic>.from(chat);
+    return data;
+  }
+
+  /// Creates a channel (when [isChannel]) or a supergroup.
+  static Future<Map<String, dynamic>?> createNewSupergroupChat({
+    required String title,
+    required bool isChannel,
+    String description = '',
+  }) =>
+      _request({
+        "@type": "createNewSupergroupChat",
+        "title": title,
+        "isForum": false,
+        "isChannel": isChannel,
+        "description": description,
+        "messageAutoDeleteTime": 0,
+        "forImport": false,
+      });
+
+  /// Renames a chat the user is allowed to administer.
+  static Future<void> setChatTitle({
+    required int chatId,
+    required String title,
+  }) =>
+      _execute({
+        "@type": "setChatTitle",
+        "chatId": chatId,
+        "title": title,
+      });
+
+  // ---------------------------------------------------------------------------
+  // Search
+  // ---------------------------------------------------------------------------
+
+  /// Searches public chats (by username or title) the user isn't a member of.
+  static Future<List<int>> searchPublicChats({required String query}) async {
+    final data = await _request({
+      "@type": "searchPublicChats",
+      "query": query,
+    });
+    return _idList(data, 'chatIds');
+  }
+
+  /// Resolves a username to its chat, or null when nothing matches.
+  static Future<Map<String, dynamic>?> searchPublicChat({
+    required String username,
+  }) =>
+      _request({"@type": "searchPublicChat", "username": username});
+
+  /// Searches messages across every chat the user takes part in.
+  static Future<Messages?> searchMessages({
+    required String query,
+    int limit = 50,
+  }) async {
+    final data = await _request({
+      "@type": "searchMessages",
+      "chatList": _chatListOf(),
+      "query": query,
+      "offset": "",
+      "limit": limit,
+    });
+    if (data == null) return null;
+    return Messages.fromJson(data);
+  }
+
+  /// Returns the user's call history, newest first.
+  static Future<Messages?> searchCallMessages({int limit = 50}) async {
+    final data = await _request({
+      "@type": "searchCallMessages",
+      "offset": "",
+      "limit": limit,
+      "onlyMissed": false,
+    });
+    if (data == null) return null;
+    return Messages.fromJson(data);
+  }
+
+  /// Looks up an invite link without joining, so the target can be previewed.
+  static Future<Map<String, dynamic>?> checkChatInviteLink({
+    required String link,
+  }) =>
+      _request({"@type": "checkChatInviteLink", "inviteLink": link});
+
+  /// Joins a chat through an invite link and returns the joined chat.
+  static Future<Map<String, dynamic>?> joinChatByInviteLink({
+    required String link,
+  }) =>
+      _request({"@type": "joinChatByInviteLink", "inviteLink": link});
+
+  // ---------------------------------------------------------------------------
+  // Contacts and blocking
+  // ---------------------------------------------------------------------------
+
+  /// Returns the user ids in the account's contact list.
+  static Future<List<int>> getContacts() async {
+    final data = await _request({"@type": "getContacts"});
+    return _idList(data, 'userIds');
+  }
+
+  /// Adds [userId] to the contact list under the given name.
+  static Future<void> addContact({
+    required int userId,
+    required String firstName,
+    String lastName = '',
+    String phoneNumber = '',
+  }) =>
+      _execute({
+        "@type": "addContact",
+        "contact": {
+          "@type": "contact",
+          "phoneNumber": phoneNumber,
+          "firstName": firstName,
+          "lastName": lastName,
+          "vcard": "",
+          "userId": userId,
+        },
+        "sharePhoneNumber": false,
+      });
+
+  /// Removes users from the contact list.
+  static Future<void> removeContacts({required List<int> userIds}) =>
+      _execute({"@type": "removeContacts", "userIds": userIds});
+
+  /// Blocks or unblocks a user.
+  ///
+  /// TDLib models "not blocked" as a null block list, hence the nullable field.
+  static Future<void> setUserBlocked({
+    required int userId,
+    required bool blocked,
+  }) =>
+      _execute({
+        "@type": "setMessageSenderBlockList",
+        "senderId": {"@type": "messageSenderUser", "userId": userId},
+        // TDLib models "not blocked" as a null block list. The bridge cannot
+        // assign a JSON null to a typed field, so unblocking omits the key.
+        if (blocked) "blockList": {"@type": "blockListMain"},
+      });
+
+  /// Returns the blocked senders, newest first.
+  static Future<List<Map<String, dynamic>>> getBlockedMessageSenders({
+    int limit = 100,
+  }) async {
+    final data = await _request({
+      "@type": "getBlockedMessageSenders",
+      "blockList": {"@type": "blockListMain"},
+      "offset": 0,
+      "limit": limit,
+    });
+    return _mapList(data, 'senders');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stickers
+  // ---------------------------------------------------------------------------
+
+  /// Returns the user's installed sticker sets as covers; call [getStickerSet]
+  /// for a set's full sticker list.
+  static Future<List<Map<String, dynamic>>> getInstalledStickerSets() async {
+    final data = await _request({
+      "@type": "getInstalledStickerSets",
+      "stickerType": {"@type": "stickerTypeRegular"},
+    });
+    return _mapList(data, 'sets');
+  }
+
+  /// Returns a sticker set with all of its stickers.
+  static Future<Map<String, dynamic>?> getStickerSet({required int setId}) =>
+      _request({"@type": "getStickerSet", "setId": setId});
+
+  /// Returns the recently used stickers.
+  static Future<List<Map<String, dynamic>>> getRecentStickers({
+    int limit = 40,
+  }) async {
+    final data = await _request({
+      "@type": "getRecentStickers",
+      "isAttached": false,
+      "limit": limit,
+    });
+    return _mapList(data, 'stickers');
+  }
+
+  /// Records a sticker as recently used so it surfaces first next time.
+  static Future<void> addRecentSticker({required int fileId}) => _execute({
+        "@type": "addRecentSticker",
+        "isAttached": false,
+        "sticker": {"@type": "inputFileId", "id": fileId},
+      });
+
+  // ---------------------------------------------------------------------------
+  // Account settings
+  // ---------------------------------------------------------------------------
+
+  /// Returns the sessions currently signed in to this account.
+  static Future<List<Map<String, dynamic>>> getActiveSessions() async {
+    final data = await _request({"@type": "getActiveSessions"});
+    return _mapList(data, 'sessions');
+  }
+
+  /// Signs another device out of the account.
+  static Future<void> terminateSession({required int sessionId}) =>
+      _execute({"@type": "terminateSession", "sessionId": sessionId});
+
+  /// Returns the default notification settings for a scope, one of
+  /// `notificationSettingsScopePrivateChats`, `...GroupChats` or
+  /// `...ChannelChats`.
+  static Future<Map<String, dynamic>?> getScopeNotificationSettings({
+    required String scope,
+  }) =>
+      _request({
+        "@type": "getScopeNotificationSettings",
+        "scope": {"@type": scope},
+      });
+
+  /// Mutes or unmutes a whole scope of chats by default.
+  static Future<void> setScopeNotificationSettings({
+    required String scope,
+    required int muteFor,
+  }) =>
+      _execute({
+        "@type": "setScopeNotificationSettings",
+        "scope": {"@type": scope},
+        "notificationSettings": {
+          "@type": "scopeNotificationSettings",
+          "muteFor": muteFor,
+        },
+      });
+
+  /// Returns a cheap approximation of the on-disk size of downloaded files.
+  static Future<Map<String, dynamic>?> getStorageStatisticsFast() =>
+      _request({"@type": "getStorageStatisticsFast"});
+
+  /// Deletes downloaded files to reclaim space. With these arguments TDLib
+  /// clears the whole file cache.
+  static Future<Map<String, dynamic>?> optimizeStorage() => _request({
+        "@type": "optimizeStorage",
+        "size": 0,
+        "ttl": 0,
+        "count": 0,
+        "immunityDelay": 0,
+        "chatLimit": 0,
+        "returnDeletedFileStatistics": false,
+      });
+
+  /// Sets the current user's profile photo from a local image file.
+  static Future<void> setProfilePhoto({required String path}) => _execute({
+        "@type": "setProfilePhoto",
+        "photo": {
+          "@type": "inputChatPhotoStatic",
+          "photo": {"@type": "inputFileLocal", "path": path},
+        },
+        "isPublic": false,
+      });
+
+  /// Returns extended info for a basic group (member list, invite link).
+  static Future<Map<String, dynamic>?> getBasicGroupFullInfo({
+    required int basicGroupId,
+  }) =>
+      _request({
+        "@type": "getBasicGroupFullInfo",
+        "basicGroupId": basicGroupId,
+      });
+
+  /// Returns extended info for a supergroup or channel.
+  static Future<Map<String, dynamic>?> getSupergroupFullInfo({
+    required int supergroupId,
+  }) =>
+      _request({
+        "@type": "getSupergroupFullInfo",
+        "supergroupId": supergroupId,
+      });
 }

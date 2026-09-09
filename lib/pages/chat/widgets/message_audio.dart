@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:nullgram/tdlib/constants.dart';
+import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
 /// An audio message bubble with inline playback.
@@ -17,9 +17,16 @@ import 'package:nullgram/tdlib/tdlib_client.dart';
 class MessageAudio extends StatefulWidget {
   final Map<String, dynamic> content;
 
+  /// The message this audio belongs to, used to report a voice note as
+  /// listened to once it is played.
+  final int chatId;
+  final int messageId;
+
   const MessageAudio({
     super.key,
     required this.content,
+    required this.chatId,
+    required this.messageId,
   });
 
   bool get _isVoiceNote => content['@type'] == 'MessageVoiceNote';
@@ -48,17 +55,14 @@ class _MessageAudioState extends State<MessageAudio> {
     _fileUpdateSubscription = TDLibClient.filesUpdates.listen(_onFileUpdate);
 
     if (widget._isVoiceNote) {
-      final raw = widget.content['voiceNote']?['waveform'];
-      if (raw is String && raw.isNotEmpty) {
-        _waveform = _decodeWaveform(raw);
-      }
+      final bytes = TdBytes.decode(widget.content['voiceNote']?['waveform']);
+      if (bytes != null) _waveform = _decodeWaveform(bytes);
     }
   }
 
-  /// Unpacks TDLib's voice waveform: a base64 byte stream of 5-bit samples
-  /// (0-31), most-significant-bit first.
-  List<int> _decodeWaveform(String base64Data) {
-    final bytes = base64Decode(base64Data);
+  /// Unpacks TDLib's voice waveform: a byte stream of 5-bit samples (0-31),
+  /// most-significant-bit first.
+  List<int> _decodeWaveform(List<int> bytes) {
     final sampleCount = (bytes.length * 8) ~/ 5;
     final samples = <int>[];
     for (var i = 0; i < sampleCount; i++) {
@@ -165,7 +169,20 @@ class _MessageAudioState extends State<MessageAudio> {
     }
   }
 
+  /// Tells TDLib the voice note has been listened to, which clears the unread
+  /// dot for the sender. Only sent once, and never for our own message.
+  void _reportListened() {
+    final voiceNote = widget.content['voiceNote'];
+    if (!widget._isVoiceNote || voiceNote?['isListened'] == true) return;
+    voiceNote['isListened'] = true;
+    TDLibClient.openMessageContent(
+      chatId: widget.chatId,
+      messageId: widget.messageId,
+    );
+  }
+
   Future<void> _prepareAndPlay(String path) async {
+    _reportListened();
     if (_player == null) {
       _player = AudioPlayer();
       // Rebuild so the progress bar and play button bind to the new player's

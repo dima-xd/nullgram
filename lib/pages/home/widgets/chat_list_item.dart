@@ -1,13 +1,19 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:nullgram/services/chat_store.dart';
 import '../../chat/widgets/chat_avatar.dart';
 
+/// One row of a chat list: avatar, title, last-message preview and the
+/// unread/muted/pinned indicators Telegram shows in the same places.
 class ChatListItem extends StatelessWidget {
   final Map<String, dynamic> chat;
-  final int? currentFolderId;
-  final Map<String, bool> fileExistsCache;
-  final Map<String, Uint8List?> miniThumbnailCache;
-  final Function(int) onTap;
+
+  /// The list this row is being shown in, which decides whether the pin badge
+  /// and pin ordering refer to the main list, the archive or a folder.
+  final ChatListKind kind;
+  final int? folderId;
+
+  final void Function(int chatId) onTap;
+  final void Function(Map<String, dynamic> chat)? onLongPress;
 
   /// When set, occurrences of this query within the title are emphasized.
   ///
@@ -17,45 +23,40 @@ class ChatListItem extends StatelessWidget {
   const ChatListItem({
     super.key,
     required this.chat,
-    required this.currentFolderId,
-    required this.fileExistsCache,
-    required this.miniThumbnailCache,
     required this.onTap,
+    this.kind = ChatListKind.main,
+    this.folderId,
+    this.onLongPress,
     this.highlightQuery,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final lastMessage = chat['lastMessage'] as Map<String, dynamic>?;
+    final scheme = theme.colorScheme;
     final chatId = chat['id'] as int;
-    final title = chat['title'] as String? ?? 'Unknown';
+    final lastMessage = chat['lastMessage'] as Map<String, dynamic>?;
+    final draft = chat['draftMessage'] as Map<String, dynamic>?;
     final unreadCount = chat['unreadCount'] as int? ?? 0;
+    final mentionCount = chat['unreadMentionCount'] as int? ?? 0;
+    final markedUnread = chat['isMarkedAsUnread'] == true;
+    final muted = isChatMuted(chat);
+    final hasUnread = unreadCount > 0 || markedUnread;
 
-    final positions = chat['positions'] as List<dynamic>?;
-    Map<String, dynamic>? currentPosition = positions?.cast<Map<String, dynamic>?>().firstWhere(
-          (p) => p?['list']?['chatFolderId'] == currentFolderId,
-      orElse: () => null,
-    );
-
-    final isPinnedInCurrentFolder = currentPosition?['isPinned'] as bool? ?? false;
+    final position = ChatStore.positionIn(chat, kind, folderId: folderId);
+    final isPinned = position?['isPinned'] == true;
 
     return InkWell(
       key: ValueKey('chat_$chatId'),
       onTap: () => onTap(chatId),
+      onLongPress:
+          onLongPress == null ? null : () => onLongPress!(chat),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            RepaintBoundary(
-              child: ChatAvatar(
-                chat: chat,
-                radius: 24,
-                fileExistsCache: fileExistsCache,
-                miniThumbnailCache: miniThumbnailCache,
-              ),
-            ),
+            RepaintBoundary(child: ChatAvatar(chat: chat, radius: 24)),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -63,58 +64,88 @@ class ChatListItem extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      if (isPinnedInCurrentFolder)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 4),
-                          child: Icon(
-                            Icons.push_pin,
-                            size: 14,
-                            color: theme.colorScheme.primary,
-                          ),
-                        ),
                       Expanded(
                         child: _ChatTitle(
-                          title: title,
-                          unreadCount: unreadCount,
+                          title: chat['title'] as String? ?? 'Unknown',
+                          hasUnread: hasUnread,
                           highlightQuery: highlightQuery,
                         ),
                       ),
-                      if (lastMessage != null)
+                      if (muted)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: Icon(
+                            Icons.volume_off,
+                            size: 15,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      if (lastMessage != null) ...[
+                        const SizedBox(width: 6),
+                        if (lastMessage['isOutgoing'] == true)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 3),
+                            child: Icon(
+                              _isRead(lastMessage) ? Icons.done_all : Icons.done,
+                              size: 15,
+                              color: scheme.primary,
+                            ),
+                          ),
                         Text(
                           _formatTime(lastMessage['date'] as int),
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                            color: scheme.onSurfaceVariant,
                           ),
                         ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      if (_previewIcon(lastMessage) != null) ...[
+                      if (draft == null && _previewIcon(lastMessage) != null) ...[
                         Icon(
                           _previewIcon(lastMessage),
                           size: 16,
-                          color: theme.colorScheme.onSurfaceVariant,
+                          color: scheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 4),
                       ],
                       Expanded(
-                        child: Text(
-                          _getMessagePreview(lastMessage),
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontWeight: unreadCount > 0 ? FontWeight.w500 : FontWeight.normal,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        child: _Preview(
+                          chat: chat,
+                          lastMessage: lastMessage,
+                          draft: draft,
+                          hasUnread: hasUnread,
                         ),
                       ),
-                      if (unreadCount > 0)
+                      if (mentionCount > 0)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: Badge(label: Text('@')),
+                        ),
+                      if (hasUnread)
                         Padding(
                           padding: const EdgeInsets.only(left: 8),
                           child: Badge(
-                            label: Text(unreadCount > 999 ? '999+' : '$unreadCount'),
+                            backgroundColor:
+                                muted ? scheme.outline : scheme.primary,
+                            label: Text(
+                              unreadCount == 0
+                                  ? ' '
+                                  : unreadCount > 999
+                                      ? '999+'
+                                      : '$unreadCount',
+                            ),
+                          ),
+                        )
+                      else if (isPinned)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Icon(
+                            Icons.push_pin,
+                            size: 15,
+                            color: scheme.onSurfaceVariant,
                           ),
                         ),
                     ],
@@ -128,6 +159,14 @@ class ChatListItem extends StatelessWidget {
     );
   }
 
+  /// Whether the peer has read our own last message. TDLib reports this as the
+  /// highest message id the other side has seen, so anything at or below it is
+  /// read.
+  bool _isRead(Map<String, dynamic> lastMessage) {
+    final lastRead = chat['lastReadOutboxMessageId'] as int? ?? 0;
+    return (lastMessage['id'] as int? ?? 0) <= lastRead;
+  }
+
   /// A leading icon describing the last message's type, or null for plain text.
   IconData? _previewIcon(Map<String, dynamic>? lastMessage) {
     switch (lastMessage?['content']?['@type'] as String?) {
@@ -137,42 +176,23 @@ class ChatListItem extends StatelessWidget {
         return Icons.videocam_outlined;
       case 'MessageVoiceNote':
         return Icons.mic_none;
+      case 'MessageAudio':
+        return Icons.music_note_outlined;
       case 'MessageDocument':
         return Icons.insert_drive_file_outlined;
       case 'MessageSticker':
         return Icons.emoji_emotions_outlined;
       case 'MessageAnimation':
         return Icons.gif_box_outlined;
+      case 'MessageCall':
+        return Icons.call_outlined;
+      case 'MessagePoll':
+        return Icons.poll_outlined;
+      case 'MessageLocation':
+      case 'MessageVenue':
+        return Icons.location_on_outlined;
       default:
         return null;
-    }
-  }
-
-  String _getMessagePreview(Map<String, dynamic>? lastMessage) {
-    if (lastMessage == null) return '';
-
-    final content = lastMessage['content'] as Map<String, dynamic>?;
-    if (content == null) return '';
-
-    final type = content['@type'] as String?;
-
-    switch (type) {
-      case 'MessageText':
-        return content['text']?['text'] as String? ?? '';
-      case 'MessagePhoto':
-        return 'Photo';
-      case 'MessageVideo':
-        return 'Video';
-      case 'MessageVoiceNote':
-        return 'Voice message';
-      case 'MessageDocument':
-        return 'Document';
-      case 'MessageSticker':
-        return 'Sticker';
-      case 'MessageAnimation':
-        return 'GIF';
-      default:
-        return 'Message';
     }
   }
 
@@ -180,14 +200,156 @@ class ChatListItem extends StatelessWidget {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
     final now = DateTime.now();
 
-    if (date.day == now.day && date.month == now.month && date.year == now.year) {
-      return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-    } else if (date.year == now.year) {
-      const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return '${date.day} ${months[date.month]}';
-    } else {
-      return '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year % 100}';
+    if (date.day == now.day &&
+        date.month == now.month &&
+        date.year == now.year) {
+      return '${date.hour.toString().padLeft(2, '0')}:'
+          '${date.minute.toString().padLeft(2, '0')}';
     }
+    if (date.year == now.year) {
+      const months = [
+        '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      return '${date.day} ${months[date.month]}';
+    }
+    return '${date.day.toString().padLeft(2, '0')}.'
+        '${date.month.toString().padLeft(2, '0')}.${date.year % 100}';
+  }
+}
+
+/// The second line of a chat row: the unsent draft when there is one, else the
+/// last message, prefixed with its sender in group chats.
+class _Preview extends StatelessWidget {
+  const _Preview({
+    required this.chat,
+    required this.lastMessage,
+    required this.draft,
+    required this.hasUnread,
+  });
+
+  final Map<String, dynamic> chat;
+  final Map<String, dynamic>? lastMessage;
+  final Map<String, dynamic>? draft;
+  final bool hasUnread;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      color: scheme.onSurfaceVariant,
+      fontWeight: hasUnread ? FontWeight.w500 : FontWeight.normal,
+    );
+
+    if (draft != null) {
+      final text = draft?['inputMessageText']?['text']?['text'] as String?;
+      return Text.rich(
+        TextSpan(
+          style: style,
+          children: [
+            TextSpan(
+              text: 'Draft: ',
+              style: TextStyle(color: scheme.error),
+            ),
+            TextSpan(text: text ?? ''),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final prefix = _senderPrefix();
+    return Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          if (prefix != null)
+            TextSpan(
+              text: '$prefix: ',
+              style: TextStyle(color: scheme.onSurface),
+            ),
+          TextSpan(text: messagePreviewText(lastMessage)),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  /// "You" for our own messages, or the sender's name in a group; null in a
+  /// private chat where the sender is implied by the row itself.
+  String? _senderPrefix() {
+    final message = lastMessage;
+    if (message == null) return null;
+    if (message['isOutgoing'] == true) return 'You';
+
+    final chatType = chat['type']?['@type'];
+    final isGroup = chatType == 'ChatTypeBasicGroup' ||
+        (chatType == 'ChatTypeSupergroup' &&
+            chat['type']?['isChannel'] != true);
+    if (!isGroup) return null;
+
+    return message['authorSignature'] as String? ??
+        _senderName(message['senderId']);
+  }
+
+  String? _senderName(dynamic senderId) {
+    if (senderId is! Map) return null;
+    if (senderId['@type'] != 'MessageSenderUser') return null;
+    return ChatStore.instance.userName(senderId['userId'] as int);
+  }
+}
+
+/// A short human-readable description of a message's content.
+String messagePreviewText(Map<String, dynamic>? message) {
+  final content = message?['content'] as Map<String, dynamic>?;
+  if (content == null) return '';
+
+  final caption = content['caption']?['text'] as String?;
+
+  switch (content['@type'] as String?) {
+    case 'MessageText':
+      return content['text']?['text'] as String? ?? '';
+    case 'MessagePhoto':
+      return caption?.isNotEmpty == true ? caption! : 'Photo';
+    case 'MessageVideo':
+      return caption?.isNotEmpty == true ? caption! : 'Video';
+    case 'MessageVoiceNote':
+      return 'Voice message';
+    case 'MessageAudio':
+      return 'Audio';
+    case 'MessageDocument':
+      return caption?.isNotEmpty == true ? caption! : 'Document';
+    case 'MessageSticker':
+      return '${content['sticker']?['emoji'] ?? ''} Sticker';
+    case 'MessageAnimation':
+      return 'GIF';
+    case 'MessagePoll':
+      return content['poll']?['question']?['text'] as String? ?? 'Poll';
+    case 'MessageLocation':
+      return 'Location';
+    case 'MessageVenue':
+      return content['venue']?['title'] as String? ?? 'Location';
+    case 'MessageContact':
+      return 'Contact';
+    case 'MessageCall':
+      return content['isVideo'] == true ? 'Video call' : 'Call';
+    case 'MessageChatJoinByLink':
+      return 'joined the chat';
+    case 'MessageChatAddMembers':
+      return 'joined the chat';
+    case 'MessageChatDeleteMember':
+      return 'left the chat';
+    case 'MessagePinMessage':
+      return 'pinned a message';
+    case 'MessageChatChangeTitle':
+      return 'changed the chat title';
+    case 'MessageChatChangePhoto':
+      return 'changed the chat photo';
+    default:
+      return 'Message';
   }
 }
 
@@ -195,32 +357,25 @@ class ChatListItem extends StatelessWidget {
 class _ChatTitle extends StatelessWidget {
   const _ChatTitle({
     required this.title,
-    required this.unreadCount,
+    required this.hasUnread,
     this.highlightQuery,
   });
 
   final String title;
-  final int unreadCount;
+  final bool hasUnread;
   final String? highlightQuery;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final baseStyle = theme.textTheme.titleMedium?.copyWith(
-      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+      fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
     );
 
     final query = highlightQuery?.trim() ?? '';
-    if (query.isEmpty) {
-      return Text(
-        title,
-        style: baseStyle,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      );
-    }
+    final start =
+        query.isEmpty ? -1 : title.toLowerCase().indexOf(query.toLowerCase());
 
-    final start = title.toLowerCase().indexOf(query.toLowerCase());
     if (start < 0) {
       return Text(
         title,

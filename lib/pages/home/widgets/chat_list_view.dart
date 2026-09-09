@@ -1,132 +1,90 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/widgets/empty_state.dart';
+import 'chat_actions_sheet.dart';
 import 'chat_list_item.dart';
 
-class ChatListView extends StatefulWidget {
-  final ValueNotifier<Map<int, Map<String, dynamic>>> chatsNotifier;
+/// A scrolling chat list backed by [ChatStore].
+///
+/// Which chats appear is decided entirely by [kind] and [folderId]: the store
+/// holds every known chat once, and each view filters it down to the chats
+/// TDLib placed in the corresponding list.
+class ChatListView extends StatelessWidget {
+  final ChatListKind kind;
   final int? folderId;
-  final Map<String, bool> fileExistsCache;
-  final Map<String, Uint8List?> miniThumbnailCache;
-  final Function(int) onChatTap;
+  final void Function(int chatId) onChatTap;
 
-  /// Whether the initial chat sync is still in progress. While loading and the
-  /// list is empty, skeleton rows are shown instead of the empty state.
-  final ValueNotifier<bool>? isLoading;
+  /// An optional row pinned above the list, used for the archive entry.
+  final Widget? header;
 
   const ChatListView({
     super.key,
-    required this.chatsNotifier,
-    required this.folderId,
-    required this.fileExistsCache,
-    required this.miniThumbnailCache,
     required this.onChatTap,
-    this.isLoading,
+    this.kind = ChatListKind.main,
+    this.folderId,
+    this.header,
   });
 
   @override
-  State<ChatListView> createState() => _ChatListViewState();
-}
-
-class _ChatListViewState extends State<ChatListView> {
-  @override
-  void initState() {
-    super.initState();
-    widget.chatsNotifier.addListener(_onChatsUpdated);
-    widget.isLoading?.addListener(_onChatsUpdated);
-  }
-
-  @override
-  void dispose() {
-    widget.chatsNotifier.removeListener(_onChatsUpdated);
-    widget.isLoading?.removeListener(_onChatsUpdated);
-    super.dispose();
-  }
-
-  void _onChatsUpdated() {
-    if (mounted) setState(() {});
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final chats = _getFilteredAndSortedChats();
+    final store = ChatStore.instance;
 
-    if (chats.isEmpty) {
-      if (widget.isLoading?.value ?? false) {
-        return const _ChatListSkeleton();
-      }
-      return const EmptyState(
-        icon: Icons.forum_outlined,
-        title: 'No chats yet',
-        subtitle: 'Your conversations will appear here.',
-        lottieAsset: 'assets/lottie/empty.json',
-      );
-    }
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, child) {
+        final chats = store.visibleChats(kind: kind, folderId: folderId);
 
-    return ListView.separated(
-      key: PageStorageKey('chat_list_${widget.folderId}'),
-      itemCount: chats.length,
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewPadding.bottom + 80,
-      ),
-      addAutomaticKeepAlives: true,
-      cacheExtent: 1000,
-      separatorBuilder: (_, _) => const Divider(
-        height: 1,
-        thickness: 0.5,
-        indent: 72,
-        endIndent: 16,
-      ),
-      itemBuilder: (context, index) => ChatListItem(
-        chat: chats[index],
-        currentFolderId: widget.folderId,
-        fileExistsCache: widget.fileExistsCache,
-        miniThumbnailCache: widget.miniThumbnailCache,
-        onTap: widget.onChatTap,
-      ),
+        if (chats.isEmpty) {
+          if (store.isLoading) return const _ChatListSkeleton();
+          return Column(
+            children: [
+              if (header != null) header!,
+              const Expanded(
+                child: EmptyState(
+                  icon: Icons.forum_outlined,
+                  title: 'No chats yet',
+                  subtitle: 'Your conversations will appear here.',
+                  lottieAsset: 'assets/lottie/empty.json',
+                ),
+              ),
+            ],
+          );
+        }
+
+        final headerCount = header == null ? 0 : 1;
+
+        return ListView.separated(
+          key: PageStorageKey('chat_list_${kind.name}_$folderId'),
+          itemCount: chats.length + headerCount,
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewPadding.bottom + 80,
+          ),
+          cacheExtent: 1000,
+          separatorBuilder: (_, _) => const Divider(
+            height: 1,
+            thickness: 0.5,
+            indent: 72,
+            endIndent: 16,
+          ),
+          itemBuilder: (context, index) {
+            if (index < headerCount) return header!;
+            final chat = chats[index - headerCount];
+            return ChatListItem(
+              chat: chat,
+              kind: kind,
+              folderId: folderId,
+              onTap: onChatTap,
+              onLongPress: (chat) => showChatActionsSheet(
+                context: context,
+                chat: chat,
+                kind: kind,
+                folderId: folderId,
+              ),
+            );
+          },
+        );
+      },
     );
-  }
-
-  List<Map<String, dynamic>> _getFilteredAndSortedChats() {
-    var allChats = widget.chatsNotifier.value.values.toList();
-
-    if (widget.folderId != null && widget.folderId != -1) {
-      allChats = allChats
-          .where((chat) => (chat['folderIds'] as List?)?.contains(widget.folderId) ?? false)
-          .toList();
-    }
-
-    allChats.sort((a, b) {
-      final aPositions = a['positions'] as List<dynamic>?;
-      final bPositions = b['positions'] as List<dynamic>?;
-
-      Map<String, dynamic>? aPosition = aPositions?.cast<Map<String, dynamic>?>().firstWhere(
-            (p) => p?['list']?['chatFolderId'] == widget.folderId,
-        orElse: () => null,
-      );
-
-      Map<String, dynamic>? bPosition = bPositions?.cast<Map<String, dynamic>?>().firstWhere(
-            (p) => p?['list']?['chatFolderId'] == widget.folderId,
-        orElse: () => null,
-      );
-
-      final aIsPinned = aPosition?['isPinned'] as bool? ?? false;
-      final bIsPinned = bPosition?['isPinned'] as bool? ?? false;
-
-      if (aIsPinned != bIsPinned) return bIsPinned ? 1 : -1;
-
-      if (aIsPinned && bIsPinned) {
-        final aOrder = int.tryParse(aPosition?['order']?.toString() ?? '0') ?? 0;
-        final bOrder = int.tryParse(bPosition?['order']?.toString() ?? '0') ?? 0;
-        return bOrder.compareTo(aOrder);
-      }
-
-      final aDate = a['lastMessage']?['date'] as int? ?? 0;
-      final bDate = b['lastMessage']?['date'] as int? ?? 0;
-      return bDate.compareTo(aDate);
-    });
-
-    return allChats;
   }
 }
 

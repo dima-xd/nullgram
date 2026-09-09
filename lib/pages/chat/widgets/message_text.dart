@@ -1,11 +1,11 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:nullgram/services/link_resolver.dart';
 import 'package:nullgram/theme/app_theme.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// Renders a TDLib `formattedText` map (`{text, entities}`) with its rich-text
 /// entities applied: bold, italic, underline, strikethrough, monospace,
-/// spoilers and tappable links.
+/// tap-to-reveal spoilers and tappable links, mentions and hashtags.
 class MessageText extends StatefulWidget {
   final Map<String, dynamic> content;
 
@@ -20,6 +20,9 @@ class MessageText extends StatefulWidget {
 
 class _MessageTextState extends State<MessageText> {
   final List<TapGestureRecognizer> _recognizers = [];
+
+  /// Character offsets of spoilers the reader has revealed.
+  final Set<int> _revealedSpoilers = {};
 
   @override
   void dispose() {
@@ -88,6 +91,8 @@ class _MessageTextState extends State<MessageText> {
       var underline = false;
       var strike = false;
       String? linkTarget;
+      String? mention;
+      int? spoilerStart;
 
       for (final entity in entities) {
         final offset = entity['offset'] as int? ?? 0;
@@ -112,7 +117,7 @@ class _MessageTextState extends State<MessageText> {
               backgroundColor: codeBackground,
             );
           case 'TextEntityTypeSpoiler':
-            style = style.copyWith(backgroundColor: codeBackground);
+            spoilerStart = offset;
           case 'TextEntityTypeTextUrl':
             linkTarget = type?['url'] as String?;
             style = style.copyWith(color: linkColor);
@@ -122,6 +127,10 @@ class _MessageTextState extends State<MessageText> {
             linkTarget = text.substring(start, end);
             style = style.copyWith(color: linkColor);
           case 'TextEntityTypeMention':
+            mention = text.substring(start, end);
+            style = style.copyWith(color: linkColor);
+          case 'TextEntityTypeMentionName':
+            style = style.copyWith(color: linkColor);
           case 'TextEntityTypeHashtag':
           case 'TextEntityTypeCashtag':
           case 'TextEntityTypeBotCommand':
@@ -138,12 +147,25 @@ class _MessageTextState extends State<MessageText> {
         );
       }
 
-      TapGestureRecognizer? recognizer;
-      if (linkTarget != null) {
-        final target = linkTarget;
-        recognizer = TapGestureRecognizer()..onTap = () => _open(target);
-        _recognizers.add(recognizer);
+      // A hidden spoiler paints its text in its own background colour, so the
+      // characters occupy the right space but can't be read until tapped.
+      final isHiddenSpoiler =
+          spoilerStart != null && !_revealedSpoilers.contains(spoilerStart);
+      if (isHiddenSpoiler) {
+        final cover = Theme.of(context).colorScheme.onSurfaceVariant;
+        style = style.copyWith(
+          color: cover,
+          backgroundColor: cover,
+          decoration: TextDecoration.none,
+        );
       }
+
+      final recognizer = _recognizerFor(
+        isHiddenSpoiler: isHiddenSpoiler,
+        spoilerStart: spoilerStart,
+        linkTarget: linkTarget,
+        mention: mention,
+      );
 
       spans.add(TextSpan(
         text: text.substring(start, end),
@@ -154,26 +176,30 @@ class _MessageTextState extends State<MessageText> {
     return spans;
   }
 
-  Future<void> _open(String target) async {
-    final uri = _resolve(target);
-    if (uri == null) return;
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
+  /// The tap handler for a span, if it has one. A hidden spoiler takes
+  /// precedence over its link, so the first tap always reveals the text.
+  TapGestureRecognizer? _recognizerFor({
+    required bool isHiddenSpoiler,
+    required int? spoilerStart,
+    required String? linkTarget,
+    required String? mention,
+  }) {
+    void Function()? onTap;
 
-  /// Turns a raw link entity into a launchable [Uri], adding the right scheme
-  /// for bare URLs, emails and phone numbers.
-  Uri? _resolve(String target) {
-    if (target.contains('@') && !target.contains('/')) {
-      return Uri(scheme: 'mailto', path: target);
+    if (isHiddenSpoiler) {
+      final offset = spoilerStart!;
+      onTap = () => setState(() => _revealedSpoilers.add(offset));
+    } else if (linkTarget != null) {
+      final target = linkTarget;
+      onTap = () => openLink(context, target);
+    } else if (mention != null) {
+      final username = mention;
+      onTap = () => openUsername(context, username);
     }
-    if (RegExp(r'^\+?[\d\s\-()]+$').hasMatch(target)) {
-      return Uri(scheme: 'tel', path: target.replaceAll(RegExp(r'\s'), ''));
-    }
-    if (target.startsWith('http://') || target.startsWith('https://')) {
-      return Uri.tryParse(target);
-    }
-    return Uri.tryParse('https://$target');
+
+    if (onTap == null) return null;
+    final recognizer = TapGestureRecognizer()..onTap = onTap;
+    _recognizers.add(recognizer);
+    return recognizer;
   }
 }

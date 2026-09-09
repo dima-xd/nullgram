@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,28 +7,37 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:nullgram/pages/chat/utils/albums_grouper.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
+import 'package:nullgram/pages/chat/utils/voice_recorder.dart';
 import 'package:nullgram/pages/chat/widgets/album_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
+import 'package:nullgram/pages/chat/widgets/chat_composer.dart';
+import 'package:nullgram/pages/chat/widgets/chat_menu.dart';
 import 'package:nullgram/pages/chat/widgets/date_separator.dart';
 import 'package:nullgram/pages/chat/widgets/forward_chat_picker.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/message_context_menu.dart';
+import 'package:nullgram/pages/chat/widgets/poll_composer.dart';
+import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/pages/profile/chat_profile_page.dart';
+import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/services/call_service.dart';
-import 'package:nullgram/theme/motion.dart';
 import 'package:nullgram/widgets/empty_state.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
 
+/// A single conversation: its history, composer and per-chat actions.
 class ChatPage extends StatefulWidget {
   final Map<String, dynamic> chat;
+
+  /// A message to scroll to when the chat opens, used when arriving from
+  /// search or a notification.
+  final int? initialMessageId;
 
   const ChatPage({
     super.key,
     required this.chat,
+    this.initialMessageId,
   });
 
   @override
@@ -38,14 +48,17 @@ class _ChatPageState extends State<ChatPage> {
   final TextEditingController _messageController = TextEditingController();
   final FocusNode _messageFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
-  final ValueNotifier<bool> _isAudioMode = ValueNotifier(true);
-  final ValueNotifier<bool> _isRecording = ValueNotifier<bool>(false);
-  final ValueNotifier<String> _messageText = ValueNotifier('');
 
   final ValueNotifier<List<Map<String, dynamic>>> _messages = ValueNotifier([]);
   final ValueNotifier<bool> _isLoading = ValueNotifier(false);
   final ValueNotifier<bool> _hasMore = ValueNotifier(true);
   final ValueNotifier<bool> _showScrollToBottom = ValueNotifier(false);
+
+  /// The live chat object. Starts as the map the caller handed over and is kept
+  /// current from [ChatStore], so the header title, mute state and read
+  /// receipts update without leaving the chat.
+  late final ValueNotifier<Map<String, dynamic>> _chat =
+      ValueNotifier(widget.chat);
 
   /// Whether the in-chat message search bar is active.
   final ValueNotifier<bool> _isSearching = ValueNotifier(false);
@@ -53,6 +66,10 @@ class _ChatPageState extends State<ChatPage> {
       ValueNotifier([]);
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
+
+  /// The selected message ids while selection mode is active, or null when it
+  /// is off. An empty set still means "selection mode, nothing picked".
+  final ValueNotifier<Set<int>?> _selection = ValueNotifier(null);
 
   /// Pinned messages in this chat, newest first; drives the top pin banner.
   final ValueNotifier<List<Map<String, dynamic>>> _pinnedMessages =
@@ -62,12 +79,13 @@ class _ChatPageState extends State<ChatPage> {
   /// updates. The TDLib chat object has no embedded user, so it is fetched via
   /// [TDLibClient.getUser] rather than read from `chat['user']`.
   final ValueNotifier<Map<String, dynamic>?> _chatUser = ValueNotifier(null);
-  StreamSubscription<Map<String, dynamic>>? _chatSubscription;
+
+  /// Whether the peer of a private chat is blocked, for the overflow menu.
+  bool _isPeerBlocked = false;
 
   /// A human-readable activity ("typing…") for the other party, shown in the
   /// header in place of the status, or null when nobody is active.
   final ValueNotifier<String?> _typingAction = ValueNotifier(null);
-  StreamSubscription<Map<String, dynamic>>? _chatActionSubscription;
 
   /// Auto-clears [_typingAction] if TDLib stops sending action updates, since a
   /// `chatActionCancel` is not always delivered.
@@ -83,7 +101,17 @@ class _ChatPageState extends State<ChatPage> {
   /// Mutually exclusive with [_replyTo].
   final ValueNotifier<Map<String, dynamic>?> _editing = ValueNotifier(null);
 
-  final _record = AudioRecorder();
+  /// The draft text the chat was opened with, so it is only written back when
+  /// the user actually changed it.
+  String _initialDraft = '';
+
+  /// The last message read before this visit, which anchors the "unread
+  /// messages" divider.
+  ///
+  /// Snapshotted on open: opening the chat marks everything read, so reading
+  /// the live value would move the divider out from under the user.
+  late final int _lastReadOnOpen =
+      widget.chat['lastReadInboxMessageId'] as int? ?? 0;
 
   /// Distance (px) from the bottom past which the jump-to-latest button shows
   /// and incoming messages stop auto-scrolling.
@@ -92,130 +120,205 @@ class _ChatPageState extends State<ChatPage> {
   static const int _batchSize = 50;
 
   StreamSubscription<Map<String, dynamic>>? _messagesSubscription;
+  StreamSubscription<Map<String, dynamic>>? _chatSubscription;
+
+  int get _chatId => widget.chat['id'] as int;
 
   @override
   void initState() {
     super.initState();
     _messageController.addListener(() {
-      _messageText.value = _messageController.text;
       if (_messageController.text.trim().isNotEmpty) _notifyTyping();
     });
 
     _scrollController.addListener(_onScroll);
 
-    _messagesSubscription = TDLibClient.messsagesUpdates.listen((update) async {
-      final type = update['@type'];
-      switch (type) {
-        case updateNewMessageConst:
-          final message = update['message'];
-          if (message['chatId'] == widget.chat['id']) {
-            if (!mounted) return;
-            if (_containsMessageId(message['id'])) return;
-            _messages.value = AlbumsGrouper.groupMediaAlbums([message, ..._messages.value]);
-            setState(() {});
-            _maybeStickToBottom(isOutgoing: message['isOutgoing'] == true);
-            if (message['isOutgoing'] != true) {
-              TDLibClient.viewMessages(
-                chatId: widget.chat['id'],
-                messageIds: [message['id'] as int],
-              );
-            }
-          }
-        case updateDeleteMessagesConst:
-          final chatId = update['chatId'];
-          final messageIds = update['messageIds'];
-          
-          if (chatId == widget.chat['id']) {
-            if (!mounted) return;
-            
-            _messages.value = _messages.value.where((message) {
-              return !messageIds.contains(message['id']);
-            }).toList();
+    _messagesSubscription =
+        TDLibClient.messsagesUpdates.listen(_onMessageUpdate);
+    _chatSubscription = TDLibClient.chatUpdates.listen(_onChatUpdate);
+    ChatStore.instance.addListener(_syncChatFromStore);
 
-            setState(() {});
-          }
-          break;
-        case updateMessageInteractionInfoConst:
-          if (update['chatId'] != widget.chat['id']) return;
-          if (!mounted) return;
-          _applyInteractionInfo(
-            update['messageId'],
-            update['interactionInfo'],
-          );
-        case updateMessageContentConst:
-          if (update['chatId'] != widget.chat['id']) return;
-          if (!mounted) return;
-          _patchMessage(
-            update['messageId'],
-            (message) => {...message, 'content': update['newContent']},
-          );
-        case updateMessageEditedConst:
-          if (update['chatId'] != widget.chat['id']) return;
-          if (!mounted) return;
-          _patchMessage(
-            update['messageId'],
-            (message) => {...message, 'editDate': update['editDate']},
-          );
-      }
-    });
-
+    _restoreDraft();
     _loadLocalMessages();
     _loadPinnedMessages();
     _resolveChatUser();
-    _listenChatActions();
 
     // Tell TDLib the chat is open so read receipts and channel updates flow.
-    TDLibClient.openChat(chatId: widget.chat['id']);
+    TDLibClient.openChat(chatId: _chatId);
     _markReadUpTo(widget.chat['lastMessage']?['id'] as int?);
 
-    // Suppress notifications for the chat currently on screen.
-    NotificationService.instance.activeChatId = widget.chat['id'] as int?;
-  }
+    // Suppress notifications for the chat currently on screen, and clear any
+    // the user is about to read anyway.
+    NotificationService.instance.activeChatId = _chatId;
+    NotificationService.instance.clear(_chatId);
 
-  /// Throttled outgoing "typing" notification, sent at most once every few
-  /// seconds while the user keeps editing the composer.
-  void _notifyTyping() {
-    final now = DateTime.now();
-    final last = _lastTypingSent;
-    if (last != null && now.difference(last) < const Duration(seconds: 4)) {
-      return;
-    }
-    _lastTypingSent = now;
-    TDLibClient.sendChatAction(chatId: widget.chat['id']);
-  }
-
-  /// Marks the chat read up to [messageId] (and all older messages).
-  void _markReadUpTo(int? messageId) {
-    if (messageId == null) return;
-    if ((widget.chat['unreadCount'] as int? ?? 0) == 0) return;
-    TDLibClient.viewMessages(
-      chatId: widget.chat['id'],
-      messageIds: [messageId],
-    );
-  }
-
-  /// Listens for the other party's activity in this chat and surfaces it as
-  /// [_typingAction], auto-clearing it after a short idle period.
-  void _listenChatActions() {
-    _chatActionSubscription = TDLibClient.chatUpdates.listen((update) {
-      if (!mounted) return;
-      if (update['@type'] != updateChatActionConst) return;
-      if (update['chatId'] != widget.chat['id']) return;
-
-      final actionType = update['action']?['@type'] as String?;
-      if (actionType == null || actionType == 'ChatActionCancel') {
-        _typingClearTimer?.cancel();
-        _typingAction.value = null;
-        return;
-      }
-
-      _typingAction.value = _describeAction(actionType);
-      _typingClearTimer?.cancel();
-      _typingClearTimer = Timer(
-        const Duration(seconds: 6),
-        () => _typingAction.value = null,
+    final initialMessageId = widget.initialMessageId;
+    if (initialMessageId != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _jumpToMessage(initialMessageId),
       );
-    });
+    }
+  }
+
+  @override
+  void dispose() {
+    _saveDraft();
+    if (NotificationService.instance.activeChatId == _chatId) {
+      NotificationService.instance.activeChatId = null;
+    }
+    TDLibClient.closeChat(chatId: _chatId);
+    ChatStore.instance.removeListener(_syncChatFromStore);
+    _typingClearTimer?.cancel();
+    _typingAction.dispose();
+    _messagesSubscription?.cancel();
+    _chatSubscription?.cancel();
+    _scrollController.removeListener(_onScroll);
+    _messageController.dispose();
+    _messageFocusNode.dispose();
+    _scrollController.dispose();
+    _messages.dispose();
+    _isLoading.dispose();
+    _hasMore.dispose();
+    _showScrollToBottom.dispose();
+    _replyTo.dispose();
+    _editing.dispose();
+    _selection.dispose();
+    _isSearching.dispose();
+    _searchResults.dispose();
+    _searchController.dispose();
+    _searchDebounce?.cancel();
+    _pinnedMessages.dispose();
+    _chatUser.dispose();
+    _chat.dispose();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Updates
+  // ---------------------------------------------------------------------------
+
+  /// Mirrors the store's copy of this chat into [_chat].
+  void _syncChatFromStore() {
+    if (!mounted) return;
+    final chat = ChatStore.instance.chat(_chatId);
+    if (chat != null) _chat.value = chat;
+  }
+
+  Future<void> _onMessageUpdate(Map<String, dynamic> update) async {
+    if (!mounted) return;
+
+    switch (update['@type']) {
+      case updateNewMessageConst:
+        final message = update['message'] as Map<String, dynamic>;
+        if (message['chatId'] != _chatId) return;
+        if (_containsMessageId(message['id'] as int)) return;
+        _messages.value =
+            AlbumsGrouper.groupMediaAlbums([message, ..._messages.value]);
+        _maybeStickToBottom(isOutgoing: message['isOutgoing'] == true);
+        if (message['isOutgoing'] != true) {
+          TDLibClient.viewMessages(
+            chatId: _chatId,
+            messageIds: [message['id'] as int],
+          );
+        }
+
+      case updateMessageSendSucceededConst:
+        // A sent message gets a brand new server-side id; swap the temporary
+        // entry out or the list would keep a ghost that no update can reach.
+        final message = update['message'] as Map<String, dynamic>;
+        if (message['chatId'] != _chatId) return;
+        _replaceMessage(update['oldMessageId'] as int, message);
+
+      case updateMessageSendFailedConst:
+        final message = update['message'] as Map<String, dynamic>;
+        if (message['chatId'] != _chatId) return;
+        _replaceMessage(update['oldMessageId'] as int, message);
+
+      case updateDeleteMessagesConst:
+        if (update['chatId'] != _chatId) return;
+        final deleted = (update['messageIds'] as List?)?.cast<int>().toSet() ??
+            const <int>{};
+        if (deleted.isEmpty) return;
+        _messages.value = [
+          for (final entry in _messages.value)
+            if (entry['isAlbum'] == true)
+              {
+                ...entry,
+                'messages': <Map<String, dynamic>>[
+                  for (final member in AlbumsGrouper.membersOf(entry))
+                    if (!deleted.contains(member['id'])) member,
+                ],
+              }
+            else if (!deleted.contains(entry['id']))
+              entry,
+        ].where((entry) {
+          if (entry['isAlbum'] != true) return true;
+          return (entry['messages'] as List).isNotEmpty;
+        }).toList();
+
+      case updateMessageInteractionInfoConst:
+        if (update['chatId'] != _chatId) return;
+        _patchMessage(
+          update['messageId'] as int,
+          (message) => {
+            ...message,
+            'interactionInfo': update['interactionInfo'],
+          },
+        );
+
+      case updateMessageContentConst:
+        if (update['chatId'] != _chatId) return;
+        _patchMessage(
+          update['messageId'] as int,
+          (message) => {...message, 'content': update['newContent']},
+        );
+
+      case updateMessageEditedConst:
+        if (update['chatId'] != _chatId) return;
+        _patchMessage(
+          update['messageId'] as int,
+          (message) => {...message, 'editDate': update['editDate']},
+        );
+
+      case updateMessageIsPinnedConst:
+        if (update['chatId'] != _chatId) return;
+        _patchMessage(
+          update['messageId'] as int,
+          (message) => {...message, 'isPinned': update['isPinned']},
+        );
+        _loadPinnedMessages();
+    }
+  }
+
+  void _onChatUpdate(Map<String, dynamic> update) {
+    if (!mounted) return;
+
+    switch (update['@type']) {
+      case updateChatActionConst:
+        if (update['chatId'] != _chatId) return;
+        final actionType = update['action']?['@type'] as String?;
+        if (actionType == null || actionType == 'ChatActionCancel') {
+          _typingClearTimer?.cancel();
+          _typingAction.value = null;
+          return;
+        }
+        _typingAction.value = _describeAction(actionType);
+        _typingClearTimer?.cancel();
+        _typingClearTimer = Timer(
+          const Duration(seconds: 6),
+          () => _typingAction.value = null,
+        );
+
+      case updateUserConst:
+        if (update['user']?['id'] == _chatUserId()) {
+          _chatUser.value = Map<String, dynamic>.from(update['user'] as Map);
+        }
+
+      case updateUserStatusConst:
+        if (update['userId'] == _chatUserId() && _chatUser.value != null) {
+          _chatUser.value = {..._chatUser.value!, 'status': update['status']};
+        }
+    }
   }
 
   /// Maps a TDLib `ChatAction` type to a short status line.
@@ -233,6 +336,25 @@ class _ChatPageState extends State<ChatPage> {
         _ => 'typing…',
       };
 
+  /// Throttled outgoing "typing" notification, sent at most once every few
+  /// seconds while the user keeps editing the composer.
+  void _notifyTyping() {
+    final now = DateTime.now();
+    final last = _lastTypingSent;
+    if (last != null && now.difference(last) < const Duration(seconds: 4)) {
+      return;
+    }
+    _lastTypingSent = now;
+    TDLibClient.sendChatAction(chatId: _chatId);
+  }
+
+  /// Marks the chat read up to [messageId] (and all older messages).
+  void _markReadUpTo(int? messageId) {
+    if (messageId == null) return;
+    if ((widget.chat['unreadCount'] as int? ?? 0) == 0) return;
+    TDLibClient.viewMessages(chatId: _chatId, messageIds: [messageId]);
+  }
+
   /// The user id behind a private/secret chat, read from the chat's type.
   int? _chatUserId() {
     final type = widget.chat['type'];
@@ -243,31 +365,8 @@ class _ChatPageState extends State<ChatPage> {
     return null;
   }
 
-  /// Places an outgoing voice call to the private chat's peer.
-  Future<void> _startVoiceCall() async {
-    final userId = _chatUserId();
-    if (userId == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Calls are available in private chats only')),
-        );
-      }
-      return;
-    }
-    if (!await _record.hasPermission()) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission required')),
-        );
-      }
-      return;
-    }
-    await callService.startCall(userId: userId, isVideo: false);
-  }
-
-  /// Resolves the chat's user (for the header) and keeps its status live by
-  /// listening to user/status chat updates.
+  /// Resolves the chat's user for the header, and its blocked state for the
+  /// overflow menu.
   void _resolveChatUser() {
     final userId = _chatUserId();
     if (userId == null) return;
@@ -276,31 +375,44 @@ class _ChatPageState extends State<ChatPage> {
       if (mounted) _chatUser.value = user;
     }).catchError((_) {});
 
-    _chatSubscription = TDLibClient.chatUpdates.listen((update) {
-      if (!mounted) return;
-      switch (update['@type']) {
-        case updateUserConst:
-          if (update['user']?['id'] == userId) _chatUser.value = update['user'];
-        case updateUserStatusConst:
-          if (update['userId'] == userId && _chatUser.value != null) {
-            _chatUser.value = {
-              ..._chatUser.value!,
-              'status': update['status'],
-            };
-          }
-      }
-    });
+    isUserBlocked(userId).then((blocked) {
+      if (mounted) _isPeerBlocked = blocked;
+    }).catchError((_) {});
   }
 
-  /// Loads the chat's pinned messages (newest first) for the top banner.
-  Future<void> _loadPinnedMessages() async {
-    final result = await TDLibClient.searchChatMessages(
-      chatId: widget.chat['id'] as int,
-      filter: const {"@type": "searchMessagesFilterPinned"},
-    );
-    if (!mounted) return;
-    _pinnedMessages.value = result?.messages ?? const [];
+  // ---------------------------------------------------------------------------
+  // Drafts
+  // ---------------------------------------------------------------------------
+
+  /// Restores the chat's server-side draft into the composer.
+  void _restoreDraft() {
+    final draft = widget.chat['draftMessage'] as Map<String, dynamic>?;
+    final text =
+        draft?['inputMessageText']?['text']?['text'] as String? ?? '';
+    if (text.isEmpty) return;
+    _initialDraft = text;
+    _messageController.text = text;
   }
+
+  /// Writes the unsent composer text back as the chat's draft.
+  ///
+  /// Called on leaving the chat, so the text survives navigation and syncs to
+  /// the user's other devices. A pending edit is deliberately not stored: its
+  /// text belongs to an existing message, not to a new one.
+  void _saveDraft() {
+    if (_editing.value != null) return;
+    final text = _messageController.text.trim();
+    if (text == _initialDraft) return;
+    TDLibClient.setChatDraftMessage(
+      chatId: _chatId,
+      text: text,
+      replyToMessageId: _replyTo.value?['id'] as int?,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Message list bookkeeping
+  // ---------------------------------------------------------------------------
 
   /// A stable per-sender key used to group consecutive messages. Albums never
   /// group with anything, so each gets a unique key.
@@ -354,7 +466,10 @@ class _ChatPageState extends State<ChatPage> {
   bool _containsMessageId(int id) {
     for (final entry in _messages.value) {
       if (entry['isAlbum'] == true) {
-        if ((entry['messages'] as List).any((m) => m['id'] == id)) return true;
+        if (AlbumsGrouper.membersOf(entry)
+            .any((member) => member['id'] == id)) {
+          return true;
+        }
       } else if (entry['id'] == id) {
         return true;
       }
@@ -367,40 +482,10 @@ class _ChatPageState extends State<ChatPage> {
   List<Map<String, dynamic>> _withoutDuplicates(
     List<Map<String, dynamic>> incoming,
   ) =>
-      incoming.where((m) => !_containsMessageId(m['id'])).toList();
-
-  /// Patches the new [interactionInfo] (view/forward counts and reactions) onto
-  /// the message with [messageId], whether it's standalone or grouped inside an
-  /// album, then refreshes the list so reaction chips redraw live.
-  void _applyInteractionInfo(int messageId, dynamic interactionInfo) {
-    var changed = false;
-    final updated = _messages.value.map((entry) {
-      if (entry['isAlbum'] == true) {
-        final members = entry['messages'] as List;
-        final index = members.indexWhere((m) => m['id'] == messageId);
-        if (index == -1) return entry;
-        members[index] = {
-          ...members[index],
-          'interactionInfo': interactionInfo,
-        };
-        changed = true;
-        return {...entry, 'messages': members};
-      }
-      if (entry['id'] == messageId) {
-        changed = true;
-        return {...entry, 'interactionInfo': interactionInfo};
-      }
-      return entry;
-    }).toList();
-
-    if (changed) {
-      _messages.value = updated;
-      setState(() {});
-    }
-  }
+      incoming.where((m) => !_containsMessageId(m['id'] as int)).toList();
 
   /// Applies [transform] to the message with [messageId], whether standalone or
-  /// grouped inside an album, then refreshes the list. Used for live edits.
+  /// grouped inside an album, then refreshes the list.
   void _patchMessage(
     int messageId,
     Map<String, dynamic> Function(Map<String, dynamic> message) transform,
@@ -408,11 +493,11 @@ class _ChatPageState extends State<ChatPage> {
     var changed = false;
     final updated = _messages.value.map((entry) {
       if (entry['isAlbum'] == true) {
-        final members = entry['messages'] as List;
-        final index = members.indexWhere((m) => m['id'] == messageId);
+        final members = AlbumsGrouper.membersOf(entry);
+        final index =
+            members.indexWhere((member) => member['id'] == messageId);
         if (index == -1) return entry;
-        members[index] =
-            transform(Map<String, dynamic>.from(members[index]));
+        members[index] = transform(members[index]);
         changed = true;
         return {...entry, 'messages': members};
       }
@@ -423,11 +508,18 @@ class _ChatPageState extends State<ChatPage> {
       return entry;
     }).toList();
 
-    if (changed) {
-      _messages.value = updated;
-      setState(() {});
-    }
+    if (changed) _messages.value = updated;
   }
+
+  /// Swaps the message with [oldMessageId] for [message], which carries a new
+  /// id after the server accepted (or rejected) the send.
+  void _replaceMessage(int oldMessageId, Map<String, dynamic> message) {
+    _patchMessage(oldMessageId, (_) => message);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Message actions
+  // ---------------------------------------------------------------------------
 
   /// Adds or removes the [emoji] reaction on [message]. Mirrors Telegram's
   /// single-reaction behavior: tapping a chosen reaction clears it, while a new
@@ -437,7 +529,6 @@ class _ChatPageState extends State<ChatPage> {
     Map<String, dynamic> message,
     String emoji,
   ) async {
-    final chatId = widget.chat['id'] as int;
     final messageId = message['id'] as int;
     final reactions =
         message['interactionInfo']?['reactions']?['reactions'] as List? ??
@@ -451,7 +542,7 @@ class _ChatPageState extends State<ChatPage> {
 
     if (chosen.contains(emoji)) {
       await TDLibClient.removeMessageReaction(
-        chatId: chatId,
+        chatId: _chatId,
         messageId: messageId,
         emoji: emoji,
       );
@@ -460,13 +551,13 @@ class _ChatPageState extends State<ChatPage> {
 
     for (final existing in chosen) {
       await TDLibClient.removeMessageReaction(
-        chatId: chatId,
+        chatId: _chatId,
         messageId: messageId,
         emoji: existing,
       );
     }
     await TDLibClient.addMessageReaction(
-      chatId: chatId,
+      chatId: _chatId,
       messageId: messageId,
       emoji: emoji,
     );
@@ -474,14 +565,20 @@ class _ChatPageState extends State<ChatPage> {
 
   /// Opens the long-press context menu and dispatches the chosen action.
   Future<void> _onMessageLongPress(Map<String, dynamic> message) async {
+    // While a selection is active, a long press extends it instead of
+    // reopening the menu.
+    if (_selection.value != null) {
+      _toggleSelected(message);
+      return;
+    }
+
     HapticFeedback.selectionClick();
-    final chatId = widget.chat['id'] as int;
     final messageId = message['id'] as int;
 
     final result = await showMessageContextMenu(
       context: context,
       availableReactions: TDLibClient.getMessageAvailableReactions(
-        chatId: chatId,
+        chatId: _chatId,
         messageId: messageId,
       ),
       canDelete: message['canBeDeletedForAllUsers'] == true ||
@@ -508,21 +605,23 @@ class _ChatPageState extends State<ChatPage> {
       case MessageMenuAction.copy:
         _copyMessage(message);
       case MessageMenuAction.forward:
-        await _forwardMessage(message);
+        await _forwardMessages([messageId]);
+      case MessageMenuAction.select:
+        _selection.value = {messageId};
       case MessageMenuAction.pin:
         await TDLibClient.pinChatMessage(
-          chatId: widget.chat['id'],
-          messageId: message['id'] as int,
+          chatId: _chatId,
+          messageId: messageId,
         );
         await _loadPinnedMessages();
       case MessageMenuAction.unpin:
         await TDLibClient.unpinChatMessage(
-          chatId: widget.chat['id'],
-          messageId: message['id'] as int,
+          chatId: _chatId,
+          messageId: messageId,
         );
         await _loadPinnedMessages();
       case MessageMenuAction.delete:
-        await _deleteMessage(message);
+        await _deleteMessages([message]);
     }
   }
 
@@ -530,7 +629,8 @@ class _ChatPageState extends State<ChatPage> {
   /// text/caption and focuses the field. Clears any pending reply.
   void _startEditing(Map<String, dynamic> message) {
     final content = message['content'];
-    final text = content?['text']?['text'] ?? content?['caption']?['text'] ?? '';
+    final text =
+        content?['text']?['text'] ?? content?['caption']?['text'] ?? '';
     _replyTo.value = null;
     _editing.value = message;
     _messageController.text = text.toString();
@@ -546,50 +646,108 @@ class _ChatPageState extends State<ChatPage> {
     final text = content?['text']?['text'] ?? content?['caption']?['text'];
     if (text is String && text.isNotEmpty) {
       Clipboard.setData(ClipboardData(text: text));
+      _toast('Copied to clipboard');
     }
   }
 
-  /// Picks a destination chat and forwards [message] into it.
-  Future<void> _forwardMessage(Map<String, dynamic> message) async {
+  /// Picks a destination chat and forwards the given messages into it.
+  Future<void> _forwardMessages(List<int> messageIds) async {
     final targetChatId = await showForwardChatPicker(context);
     if (targetChatId == null) return;
     await TDLibClient.forwardMessages(
       chatId: targetChatId,
-      fromChatId: widget.chat['id'],
-      messageIds: [message['id'] as int],
+      fromChatId: _chatId,
+      messageIds: messageIds,
     );
+    if (mounted) _toast('Forwarded');
   }
 
-  /// Confirms and deletes [message] for all chat members.
-  Future<void> _deleteMessage(Map<String, dynamic> message) async {
-    final confirmed = await showDialog<bool>(
+  /// Confirms and deletes messages, offering the "for everyone" choice only
+  /// when TDLib says every selected message allows it.
+  Future<void> _deleteMessages(List<Map<String, dynamic>> messages) async {
+    if (messages.isEmpty) return;
+    final canRevoke =
+        messages.every((m) => m['canBeDeletedForAllUsers'] == true);
+    final count = messages.length;
+
+    final revoke = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete message?'),
-        content: const Text('This message will be deleted for everyone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+      builder: (dialogContext) {
+        final scheme = Theme.of(dialogContext).colorScheme;
+        return AlertDialog(
+          title: Text(count == 1 ? 'Delete message?' : 'Delete $count messages?'),
+          content: Text(
+            canRevoke
+                ? 'Choose whether to delete for everyone or only for you.'
+                : 'This will only be deleted for you.',
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Delete for me'),
+            ),
+            if (canRevoke)
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: scheme.error,
+                  foregroundColor: scheme.onError,
+                ),
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('For everyone'),
+              ),
+          ],
+        );
+      },
     );
 
-    if (confirmed != true) return;
+    if (revoke == null) return;
     await TDLibClient.deleteMessages(
-      chatId: widget.chat['id'],
-      messageIds: [message['id'] as int],
+      chatId: _chatId,
+      messageIds: [for (final message in messages) message['id'] as int],
+      revoke: revoke,
     );
+    _selection.value = null;
   }
 
-  void _openSearch() {
-    _isSearching.value = true;
+  // ---------------------------------------------------------------------------
+  // Selection mode
+  // ---------------------------------------------------------------------------
+
+  void _toggleSelected(Map<String, dynamic> message) {
+    final current = _selection.value;
+    if (current == null) return;
+    final messageId = message['id'] as int;
+    final updated = Set<int>.from(current);
+    if (!updated.remove(messageId)) updated.add(messageId);
+    _selection.value = updated;
   }
+
+  /// The message objects behind the current selection, albums flattened into
+  /// their members.
+  List<Map<String, dynamic>> _selectedMessages() {
+    final selected = _selection.value ?? const {};
+    final result = <Map<String, dynamic>>[];
+    for (final entry in _messages.value) {
+      if (entry['isAlbum'] == true) {
+        for (final member in AlbumsGrouper.membersOf(entry)) {
+          if (selected.contains(member['id'])) result.add(member);
+        }
+      } else if (selected.contains(entry['id'])) {
+        result.add(entry);
+      }
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Search within the chat
+  // ---------------------------------------------------------------------------
+
+  void _openSearch() => _isSearching.value = true;
 
   void _closeSearch() {
     _searchDebounce?.cancel();
@@ -611,7 +769,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _runSearch(String query) async {
     final result = await TDLibClient.searchChatMessages(
-      chatId: widget.chat['id'] as int,
+      chatId: _chatId,
       query: query,
     );
     if (!mounted) return;
@@ -626,7 +784,7 @@ class _ChatPageState extends State<ChatPage> {
     _isLoading.value = true;
 
     final window = await TDLibClient.getChatHistory(
-      chatId: widget.chat['id']!,
+      chatId: _chatId,
       fromMessageId: messageId,
       offset: -25,
       limit: 50,
@@ -639,30 +797,45 @@ class _ChatPageState extends State<ChatPage> {
     _messages.value = AlbumsGrouper.groupMediaAlbums([...messages]);
     _hasMore.value = true;
     _isLoading.value = false;
-    setState(() {});
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients || _messages.value.isEmpty) return;
       final index = _messages.value.indexWhere((m) => m['id'] == messageId);
       if (index < 0) return;
-      final itemHeight =
-          _scrollController.position.maxScrollExtent / _messages.value.length;
+      final position = _scrollController.position;
+      // The list is lazily built, so real item extents aren't known; an
+      // average is close enough to bring the target on screen.
+      final itemHeight = position.maxScrollExtent / _messages.value.length;
       _scrollController.jumpTo(
-        (index * itemHeight)
-            .clamp(0.0, _scrollController.position.maxScrollExtent),
+        (index * itemHeight).clamp(0.0, position.maxScrollExtent),
       );
     });
   }
+
+  /// Loads the chat's pinned messages (newest first) for the top banner.
+  Future<void> _loadPinnedMessages() async {
+    final result = await TDLibClient.searchChatMessages(
+      chatId: _chatId,
+      filter: const {"@type": "searchMessagesFilterPinned"},
+    );
+    if (!mounted) return;
+    _pinnedMessages.value = result?.messages ?? const [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // History loading
+  // ---------------------------------------------------------------------------
 
   Future<void> _loadLocalMessages() async {
     try {
       while (true) {
         if (!mounted) return;
         _isLoading.value = true;
-        final fromId = _messages.value.isEmpty ? 0 : _messages.value.last['id'];
+        final fromId =
+            _messages.value.isEmpty ? 0 : _messages.value.last['id'] as int;
 
         final localMessages = await TDLibClient.getChatHistory(
-          chatId: widget.chat['id']!,
+          chatId: _chatId,
           fromMessageId: fromId,
           offset: 0,
           limit: _batchSize * 2,
@@ -675,12 +848,10 @@ class _ChatPageState extends State<ChatPage> {
             ? const <Map<String, dynamic>>[]
             : _withoutDuplicates(localMessages.messages);
 
-        if (fresh.isNotEmpty) {
-          _messages.value = AlbumsGrouper.groupMediaAlbums([..._messages.value, ...fresh]);
-          setState(() {});
-        } else {
-          break;
-        }
+        if (fresh.isEmpty) break;
+        _messages.value = AlbumsGrouper.groupMediaAlbums(
+          [..._messages.value, ...fresh],
+        );
       }
     } catch (e) {
       logger.e('Error loading initial messages: $e');
@@ -693,15 +864,18 @@ class _ChatPageState extends State<ChatPage> {
     if (_isLoading.value || !_hasMore.value) return;
     _isLoading.value = true;
 
-    final fromId = _messages.value.isEmpty ? 0 : _messages.value.last['id'];
+    final fromId =
+        _messages.value.isEmpty ? 0 : _messages.value.last['id'] as int;
 
     final messages = await TDLibClient.getChatHistory(
-      chatId: widget.chat['id']!,
+      chatId: _chatId,
       fromMessageId: fromId,
       offset: 0,
       limit: _batchSize * 2,
       onlyLocal: false,
     );
+
+    if (!mounted) return;
 
     if (messages == null || messages.messages.isEmpty) {
       _hasMore.value = false;
@@ -715,85 +889,14 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
-    final pos = _scrollController.position;
-    final firstVisibleIndex = (_messages.value.isNotEmpty && pos.maxScrollExtent > 0)
-        ? (pos.pixels / (pos.maxScrollExtent / _messages.value.length)).round().clamp(0, _messages.value.length - 1)
-        : 0;
-
-    _messages.value = AlbumsGrouper.groupMediaAlbums([..._messages.value, ...fresh]);
-
-    await Future.delayed(Duration.zero);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        final itemHeight = _scrollController.position.maxScrollExtent / _messages.value.length;
-        final targetPosition = firstVisibleIndex * itemHeight;
-        _scrollController.jumpTo(targetPosition.clamp(0.0, _scrollController.position.maxScrollExtent));
-      }
-      _isLoading.value = false;
-    });
+    _messages.value =
+        AlbumsGrouper.groupMediaAlbums([..._messages.value, ...fresh]);
+    _isLoading.value = false;
   }
 
-  @override
-  void dispose() {
-    if (NotificationService.instance.activeChatId == widget.chat['id']) {
-      NotificationService.instance.activeChatId = null;
-    }
-    TDLibClient.closeChat(chatId: widget.chat['id']);
-    _typingClearTimer?.cancel();
-    _typingAction.dispose();
-    _chatActionSubscription?.cancel();
-    _messagesSubscription?.cancel();
-    _scrollController.removeListener(_onScroll);
-    _messageController.dispose();
-    _messageFocusNode.dispose();
-    _scrollController.dispose();
-    _isAudioMode.dispose();
-    _messageText.dispose();
-    _messages.dispose();
-    _isLoading.dispose();
-    _hasMore.dispose();
-    _showScrollToBottom.dispose();
-    _replyTo.dispose();
-    _editing.dispose();
-    _isSearching.dispose();
-    _searchResults.dispose();
-    _searchController.dispose();
-    _searchDebounce?.cancel();
-    _pinnedMessages.dispose();
-    _chatUser.dispose();
-    _chatSubscription?.cancel();
-    _record.dispose();
-    super.dispose();
-  }
-
-  Future<void> startAudioRecording() async {
-    if (await _record.hasPermission()) {
-      _isRecording.value = true;
-
-      final dir = await getTemporaryDirectory();
-
-      await _record.start(
-        const RecordConfig(
-          encoder: AudioEncoder.opus,
-          bitRate: 96000,
-        ),
-        path: '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.ogg',
-      );
-    }
-  }
-  Future<void> stopAudioRecording() async {
-    final chatId = widget.chat['id'];
-    final path = await _record.stop();
-
-    _isRecording.value = false;
-
-    await TDLibClient.sendAudio(chatId: chatId, path: path!);
-  }
-
-  // TODO: Implement video recording methods
-  Future<void> startVideoRecording() async {}
-  Future<void> stopVideoRecording() async {}
+  // ---------------------------------------------------------------------------
+  // Sending
+  // ---------------------------------------------------------------------------
 
   Future<void> _sendMessage() async {
     final raw = _messageController.text.trim();
@@ -813,7 +916,7 @@ class _ChatPageState extends State<ChatPage> {
       _messageController.clear();
       _editing.value = null;
       await TDLibClient.editMessageText(
-        chatId: widget.chat['id'],
+        chatId: _chatId,
         messageId: editing['id'] as int,
         text: text,
         entities: entities,
@@ -824,12 +927,39 @@ class _ChatPageState extends State<ChatPage> {
     final replyToMessageId = _replyTo.value?['id'] as int?;
     _messageController.clear();
     _replyTo.value = null;
+    // The composer is empty now, so a stored draft would be stale.
+    _initialDraft = '';
+    await TDLibClient.setChatDraftMessage(chatId: _chatId, text: '');
     await TDLibClient.sendMessage(
-      chatId: widget.chat['id'],
+      chatId: _chatId,
       text: text,
       replyToMessageId: replyToMessageId,
       entities: entities,
     );
+  }
+
+  Future<void> _onVoiceRecorded(VoiceRecording? recording) async {
+    if (recording == null) return;
+    final replyToMessageId = _replyTo.value?['id'] as int?;
+    _replyTo.value = null;
+    await TDLibClient.sendVoiceNote(
+      chatId: _chatId,
+      path: recording.path,
+      duration: recording.duration,
+      waveform: recording.waveform,
+      replyToMessageId: replyToMessageId,
+    );
+  }
+
+  Future<void> _onStickerPicked(int fileId) async {
+    final replyToMessageId = _replyTo.value?['id'] as int?;
+    _replyTo.value = null;
+    await TDLibClient.sendSticker(
+      chatId: _chatId,
+      fileId: fileId,
+      replyToMessageId: replyToMessageId,
+    );
+    await TDLibClient.addRecentSticker(fileId: fileId);
   }
 
   /// Wraps the current selection with [left]/[right] markers and keeps the
@@ -886,20 +1016,30 @@ class _ChatPageState extends State<ChatPage> {
     _wrapSelection('[', ']($url)');
   }
 
-  /// Shows the attach options (photo / video / document) and sends the picked
-  /// file, using any composer text as its caption.
+  /// Shows the attach options and sends the picked content, using any composer
+  /// text as its caption.
   void _showAttachMenu() {
     showModalBottomSheet<void>(
       context: context,
+      showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_outlined),
-              title: const Text('Photo'),
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photos'),
+              subtitle: const Text('Send one or several as an album'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                _pickAndSendImage(isVideo: false);
+                _pickAndSendPhotos();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Camera'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _pickAndSendImage(isVideo: false, fromCamera: true);
               },
             ),
             ListTile(
@@ -918,6 +1058,14 @@ class _ChatPageState extends State<ChatPage> {
                 _pickAndSendDocument();
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.poll_outlined),
+              title: const Text('Poll'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _createPoll();
+              },
+            ),
           ],
         ),
       ),
@@ -934,25 +1082,55 @@ class _ChatPageState extends State<ChatPage> {
     return (caption: caption, replyToMessageId: replyToMessageId);
   }
 
-  Future<void> _pickAndSendImage({required bool isVideo}) async {
+  /// Picks any number of photos and sends them, grouping several into one
+  /// album rather than a run of separate messages.
+  Future<void> _pickAndSendPhotos() async {
+    final files = await ImagePicker().pickMultiImage();
+    if (files.isEmpty) return;
+
+    final composer = _consumeComposer();
+    if (files.length == 1) {
+      await TDLibClient.sendPhoto(
+        chatId: _chatId,
+        path: files.single.path,
+        caption: composer.caption,
+        replyToMessageId: composer.replyToMessageId,
+      );
+      return;
+    }
+
+    await TDLibClient.sendMediaAlbum(
+      chatId: _chatId,
+      items: [
+        for (final file in files) (path: file.path, isVideo: false),
+      ],
+      caption: composer.caption,
+      replyToMessageId: composer.replyToMessageId,
+    );
+  }
+
+  Future<void> _pickAndSendImage({
+    required bool isVideo,
+    bool fromCamera = false,
+  }) async {
     final picker = ImagePicker();
+    final source = fromCamera ? ImageSource.camera : ImageSource.gallery;
     final file = isVideo
-        ? await picker.pickVideo(source: ImageSource.gallery)
-        : await picker.pickImage(source: ImageSource.gallery);
+        ? await picker.pickVideo(source: source)
+        : await picker.pickImage(source: source);
     if (file == null) return;
 
     final composer = _consumeComposer();
-    final chatId = widget.chat['id'] as int;
     if (isVideo) {
       await TDLibClient.sendVideo(
-        chatId: chatId,
+        chatId: _chatId,
         path: file.path,
         caption: composer.caption,
         replyToMessageId: composer.replyToMessageId,
       );
     } else {
       await TDLibClient.sendPhoto(
-        chatId: chatId,
+        chatId: _chatId,
         path: file.path,
         caption: composer.caption,
         replyToMessageId: composer.replyToMessageId,
@@ -967,225 +1145,550 @@ class _ChatPageState extends State<ChatPage> {
 
     final composer = _consumeComposer();
     await TDLibClient.sendDocument(
-      chatId: widget.chat['id'] as int,
+      chatId: _chatId,
       path: path,
       caption: composer.caption,
       replyToMessageId: composer.replyToMessageId,
     );
   }
 
-  /// Builds the composer's text-selection menu: a single compact, horizontally
-  /// scrolling bar (Telegram-style) with copy/paste plus formatting actions
-  /// that wrap the selection with MarkdownV2 markers.
-  ///
-  /// A custom bar is used instead of [AdaptiveTextSelectionToolbar] because the
-  /// platform toolbar overflows its many items into a vertical menu that can
-  /// exceed the screen height and crash during layout.
-  Widget _composerContextMenu(
-    BuildContext context,
-    EditableTextState editableTextState,
-  ) {
-    final selection = _messageController.selection;
-    final hasSelection = selection.isValid && !selection.isCollapsed;
-
-    void act(VoidCallback apply) {
-      editableTextState.hideToolbar();
-      apply();
-    }
-
-    final items = <_SelectionAction>[
-      if (hasSelection)
-        _SelectionAction('Copy', () {
-          act(() =>
-              editableTextState.copySelection(SelectionChangedCause.toolbar));
-        }),
-      _SelectionAction('Paste', () {
-        act(() =>
-            editableTextState.pasteText(SelectionChangedCause.toolbar));
-      }),
-      if (hasSelection) ...[
-        _SelectionAction('Bold', () => act(() => _wrapSelection('*', '*'))),
-        _SelectionAction('Italic', () => act(() => _wrapSelection('_', '_'))),
-        _SelectionAction(
-            'Underline', () => act(() => _wrapSelection('__', '__'))),
-        _SelectionAction('Strike', () => act(() => _wrapSelection('~', '~'))),
-        _SelectionAction('Mono', () => act(() => _wrapSelection('`', '`'))),
-        _SelectionAction('Link', () => act(_insertLink)),
-      ],
-    ];
-
-    return _SelectionFormatBar(
-      anchor: editableTextState.contextMenuAnchors.primaryAnchor,
-      topInset: MediaQuery.of(context).padding.top,
-      items: items,
+  Future<void> _createPoll() async {
+    final poll = await showPollComposer(context);
+    if (poll == null) return;
+    await TDLibClient.sendPoll(
+      chatId: _chatId,
+      question: poll.question,
+      options: poll.options,
+      isAnonymous: poll.isAnonymous,
+      allowMultipleAnswers: poll.allowMultipleAnswers,
     );
   }
 
-  Widget _buildMessageInput() {
-    final canSendBasicMessages = widget.chat['permissions']?['canSendBasicMessages'] ?? true;
+  // ---------------------------------------------------------------------------
+  // Chat-level actions
+  // ---------------------------------------------------------------------------
 
-    if (!canSendBasicMessages) {
-      // No composer for channels/restricted chats. Still reserve the bottom
-      // safe-area inset so the newest messages don't slide under the OS
-      // navigation buttons.
-      return SizedBox(height: MediaQuery.of(context).viewPadding.bottom);
+  /// Places an outgoing voice call to the private chat's peer.
+  Future<void> _startVoiceCall() async {
+    final userId = _chatUserId();
+    if (userId == null) {
+      _toast('Calls are available in private chats only');
+      return;
     }
+    await callService.startCall(userId: userId, isVideo: false);
+  }
 
-    return SafeArea(
-      top: false,
-      child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        border: Border(
-          top: BorderSide(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-        ),
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatProfilePage(chat: _chatWithUser()),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedSize(
-            duration: Motion.fast,
-            curve: Motion.standard,
-            alignment: Alignment.topCenter,
-            child: _buildEditPreview(),
+    );
+  }
+
+  Map<String, dynamic> _chatWithUser() {
+    final user = _chatUser.value;
+    return user == null ? _chat.value : {..._chat.value, 'user': user};
+  }
+
+  Future<void> _openChatMenu() async {
+    final action = await showChatMenu(
+      context: context,
+      chat: _chat.value,
+      isBlocked: _isPeerBlocked,
+    );
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case ChatMenuAction.openProfile:
+        _openProfile();
+      case ChatMenuAction.search:
+        _openSearch();
+      case ChatMenuAction.selectMessages:
+        _selection.value = const {};
+      case ChatMenuAction.toggleMute:
+        await TDLibClient.setChatNotificationSettings(
+          chatId: _chatId,
+          muteFor: isChatMuted(_chat.value) ? 0 : TDLibClient.muteForever,
+        );
+      case ChatMenuAction.clearHistory:
+        if (await _confirm('Clear history?', 'Clear')) {
+          await TDLibClient.deleteChatHistory(chatId: _chatId);
+          if (mounted) _messages.value = [];
+        }
+      case ChatMenuAction.toggleBlock:
+        final userId = _chatUserId();
+        if (userId == null) return;
+        await TDLibClient.setUserBlocked(
+          userId: userId,
+          blocked: !_isPeerBlocked,
+        );
+        if (!mounted) return;
+        setState(() => _isPeerBlocked = !_isPeerBlocked);
+        _toast(_isPeerBlocked ? 'User blocked' : 'User unblocked');
+      case ChatMenuAction.deleteChat:
+        if (await _confirm('Delete chat?', 'Delete')) {
+          await TDLibClient.deleteChatHistory(
+            chatId: _chatId,
+            removeFromChatList: true,
+          );
+          if (mounted) Navigator.pop(context);
+        }
+      case ChatMenuAction.leaveChat:
+        if (await _confirm('Leave chat?', 'Leave')) {
+          await TDLibClient.leaveChat(chatId: _chatId);
+          if (mounted) Navigator.pop(context);
+        }
+    }
+  }
+
+  Future<bool> _confirm(String title, String action) async {
+    final scheme = Theme.of(context).colorScheme;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: const Text('This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
           ),
-          AnimatedSize(
-            duration: Motion.fast,
-            curve: Motion.standard,
-            alignment: Alignment.topCenter,
-            child: _buildReplyPreview(),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: scheme.error,
+              foregroundColor: scheme.onError,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(action),
           ),
-          Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.emoji_emotions_outlined),
-            onPressed: () {},
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Set<int>?>(
+      valueListenable: _selection,
+      builder: (context, selection, child) {
+        // Selection mode owns the back gesture: it should clear the selection
+        // rather than leave the chat.
+        return PopScope(
+          canPop: selection == null,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _selection.value = null;
+          },
+          child: Scaffold(
+            appBar: _buildAppBar(selection),
+            body: Column(
+              children: [
+                _buildPinnedBanner(),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      _buildMessageList(selection),
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: _showScrollToBottom,
+                          builder: (context, show, child) => AnimatedScale(
+                            scale: show ? 1 : 0,
+                            duration: const Duration(milliseconds: 150),
+                            curve: Curves.easeOut,
+                            child: FloatingActionButton.small(
+                              onPressed: _scrollToBottom,
+                              child: const Icon(Icons.keyboard_arrow_down),
+                            ),
+                          ),
+                        ),
+                      ),
+                      _buildSearchResults(),
+                    ],
+                  ),
+                ),
+                _buildComposer(selection),
+              ],
+            ),
           ),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(24),
+        );
+      },
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(Set<int>? selection) {
+    if (selection != null) return _buildSelectionAppBar(selection);
+
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(kToolbarHeight),
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _isSearching,
+        builder: (context, isSearching, child) {
+          if (isSearching) {
+            return AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _closeSearch,
               ),
+              titleSpacing: 0,
+              title: TextField(
+                controller: _searchController,
+                autofocus: true,
+                onChanged: _onSearchChanged,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  hintText: 'Search messages...',
+                  border: InputBorder.none,
+                ),
+              ),
+            );
+          }
+          return AppBar(
+            titleSpacing: 0,
+            title: _buildHeader(),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.search),
+                tooltip: 'Search in chat',
+                onPressed: _openSearch,
+              ),
+              if (_chatUserId() != null)
+                IconButton(
+                  icon: const Icon(Icons.call),
+                  tooltip: 'Call',
+                  onPressed: _startVoiceCall,
+                ),
+              IconButton(
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'More',
+                onPressed: _openChatMenu,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  AppBar _buildSelectionAppBar(Set<int> selection) {
+    final count = selection.length;
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.close),
+        tooltip: 'Cancel',
+        onPressed: () => _selection.value = null,
+      ),
+      title: Text(count == 0 ? 'Select messages' : '$count selected'),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.copy_outlined),
+          tooltip: 'Copy',
+          onPressed: count == 0
+              ? null
+              : () {
+                  final text = _selectedMessages()
+                      .map(messagePreviewText)
+                      .where((line) => line.isNotEmpty)
+                      .join('\n');
+                  if (text.isEmpty) return;
+                  Clipboard.setData(ClipboardData(text: text));
+                  _selection.value = null;
+                  _toast('Copied to clipboard');
+                },
+        ),
+        IconButton(
+          icon: const Icon(Icons.forward),
+          tooltip: 'Forward',
+          onPressed: count == 0
+              ? null
+              : () async {
+                  final ids = selection.toList();
+                  _selection.value = null;
+                  await _forwardMessages(ids);
+                },
+        ),
+        IconButton(
+          icon: const Icon(Icons.delete_outline),
+          tooltip: 'Delete',
+          onPressed: count == 0 ? null : () => _deleteMessages(_selectedMessages()),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHeader() {
+    return ValueListenableBuilder<Map<String, dynamic>>(
+      valueListenable: _chat,
+      builder: (context, chat, child) {
+        return ValueListenableBuilder<Map<String, dynamic>?>(
+          valueListenable: _chatUser,
+          builder: (context, user, child) {
+            // Merge the resolved user into the chat so the avatar's
+            // online/bot indicator and the profile screen see it; the TDLib
+            // chat object itself carries no user.
+            final chatWithUser = user == null ? chat : {...chat, 'user': user};
+            return InkWell(
+              onTap: _openProfile,
               child: Row(
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      focusNode: _messageFocusNode,
-                      maxLines: null,
-                      textCapitalization: TextCapitalization.sentences,
-                      contextMenuBuilder: _composerContextMenu,
-                      decoration: const InputDecoration(
-                        hintText: 'Write a message...',
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
+                  Hero(
+                    tag: 'chat_avatar_$_chatId',
+                    child: ChatAvatar(chat: chatWithUser, radius: 20),
                   ),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    onTap: _showAttachMenu,
-                    borderRadius: BorderRadius.circular(16),
-                    child: const Padding(
-                      padding: EdgeInsets.all(4),
-                      child: Icon(Icons.attach_file, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                chat['title'] as String? ?? 'Chat',
+                                style:
+                                    Theme.of(context).textTheme.titleMedium,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (isChatMuted(chat))
+                              Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: Icon(
+                                  Icons.volume_off,
+                                  size: 15,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                          ],
+                        ),
+                        _buildHeaderSubtitle(chat, user),
+                      ],
                     ),
                   ),
                 ],
               ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          ValueListenableBuilder<String>(
-            valueListenable: _messageText,
-            builder: (context, text, child) {
-              // Non-empty text shows a send button; an empty field falls back to
-              // the audio/video recorder. The two morph via an AnimatedSwitcher.
-              return AnimatedSwitcher(
-                duration: Motion.fast,
-                transitionBuilder: (child, anim) => ScaleTransition(
-                  scale: anim,
-                  child: FadeTransition(opacity: anim, child: child),
-                ),
-                child: text.trim().isNotEmpty
-                    ? IconButton.filled(
-                        key: const ValueKey('send'),
-                        onPressed: _sendMessage,
-                        tooltip: 'Send',
-                        icon: const Icon(Icons.send),
-                      )
-                    : ValueListenableBuilder<bool>(
-                        key: const ValueKey('record'),
-                        valueListenable: _isAudioMode,
-                        builder: (context, isAudioMode, child) {
-                          return ValueListenableBuilder<bool>(
-                            valueListenable: _isRecording,
-                            builder: (context, isRecording, child) {
-                              return GestureDetector(
-                                onTap: () {
-                                  if (_isAudioMode.value &&
-                                      _isRecording.value) {
-                                    stopAudioRecording();
-                                    return;
-                                  } else if (!_isAudioMode.value &&
-                                      _isRecording.value) {
-                                    stopVideoRecording();
-                                    return;
-                                  }
-                                  _isAudioMode.value = !isAudioMode;
-                                },
-                                onLongPressStart: (_) async {
-                                  if (isAudioMode) {
-                                    await startAudioRecording();
-                                  } else {
-                                    await startVideoRecording();
-                                  }
-                                },
-                                child: Container(
-                                  width: 48,
-                                  height: 48,
-                                  decoration: BoxDecoration(
-                                    color: isRecording
-                                        ? Theme.of(context).colorScheme.error
-                                        : Theme.of(context).colorScheme.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Center(
-                                    child: Icon(
-                                      isAudioMode
-                                          ? (isRecording
-                                              ? Icons.mic
-                                              : Icons.mic_none)
-                                          : Icons.videocam,
-                                      color: isRecording
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .onError
-                                          : Theme.of(context)
-                                              .colorScheme
-                                              .onPrimary,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildHeaderSubtitle(
+    Map<String, dynamic> chat,
+    Map<String, dynamic>? user,
+  ) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: _typingAction,
+      builder: (context, typing, child) {
+        final scheme = Theme.of(context).colorScheme;
+        if (typing != null) {
+          return Text(
+            typing,
+            style: TextStyle(fontSize: 13, color: scheme.primary),
+          );
+        }
+        final mutedStyle =
+            TextStyle(fontSize: 13, color: scheme.onSurfaceVariant);
+        if (user != null) {
+          return Text(
+            MessageFormatter.getUserStatus(user),
+            style: mutedStyle,
+          );
+        }
+        final supergroup = chat['supergroup'];
+        if (supergroup != null) {
+          final count = supergroup['memberCount'] as int? ?? 0;
+          final label =
+              supergroup['isChannel'] == true ? 'subscribers' : 'members';
+          return Text(
+            '${NumberFormat('#,###', 'en_US').format(count)} $label',
+            style: mutedStyle,
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  Widget _buildComposer(Set<int>? selection) {
+    // Selection mode replaces the composer with its action bar in the app bar,
+    // so nothing is offered here.
+    if (selection != null) {
+      return SizedBox(height: MediaQuery.of(context).viewPadding.bottom);
+    }
+
+    return ValueListenableBuilder<Map<String, dynamic>>(
+      valueListenable: _chat,
+      builder: (context, chat, child) {
+        final canSend =
+            chat['permissions']?['canSendBasicMessages'] as bool? ?? true;
+        if (!canSend) {
+          // No composer for channels/restricted chats. Still reserve the
+          // bottom safe-area inset so the newest messages don't slide under
+          // the OS navigation buttons.
+          return SizedBox(height: MediaQuery.of(context).viewPadding.bottom);
+        }
+        return ChatComposer(
+          controller: _messageController,
+          focusNode: _messageFocusNode,
+          replyTo: _replyTo,
+          editing: _editing,
+          onSend: _sendMessage,
+          onVoice: _onVoiceRecorded,
+          onSticker: _onStickerPicked,
+          onAttach: _showAttachMenu,
+          onFormat: _wrapSelection,
+          onInsertLink: _insertLink,
+        );
+      },
+    );
+  }
+
+  Widget _buildMessageList(Set<int>? selection) {
+    return ValueListenableBuilder<List<Map<String, dynamic>>>(
+      valueListenable: _messages,
+      builder: (context, messages, child) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: _isLoading,
+          builder: (context, isLoading, child) {
+            if (messages.isEmpty && !isLoading) {
+              return const EmptyState(
+                icon: Icons.forum_outlined,
+                title: 'No messages yet',
+                subtitle: 'Send a message to start the conversation.',
+                lottieAsset: 'assets/lottie/empty.json',
               );
-            },
-          )
-        ],
-      ),
-        ],
-      ),
-    ),
+            }
+
+            return ListView.builder(
+              controller: _scrollController,
+              reverse: true,
+              itemCount: messages.length + (isLoading ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (isLoading && index == messages.length) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  );
+                }
+
+                final message = messages[index];
+
+                // Prefetch older history well before the user reaches the end.
+                if (index >= messages.length - 20 &&
+                    !isLoading &&
+                    _hasMore.value) {
+                  WidgetsBinding.instance
+                      .addPostFrameCallback((_) => _loadBatch());
+                }
+
+                // In a reverse list, lower indices are newer. "Older" sits
+                // above (next index), "newer" below (previous index).
+                final older =
+                    index + 1 < messages.length ? messages[index + 1] : null;
+                final newer = index - 1 >= 0 ? messages[index - 1] : null;
+
+                final bubble = _buildBubble(
+                  message: message,
+                  isFirstInGroup: !_sameGroup(message, older),
+                  isLastInGroup: !_sameGroup(message, newer),
+                  selection: selection,
+                );
+
+                final showDateSeparator = older == null ||
+                    !MessageFormatter.isSameDay(
+                      message['date'] as int,
+                      older['date'] as int,
+                    );
+                final showUnreadDivider = _isFirstUnread(message, older);
+                if (!showDateSeparator && !showUnreadDivider) {
+                  return bubble;
+                }
+
+                return Column(
+                  children: [
+                    if (showDateSeparator)
+                      DateSeparator(
+                        label: MessageFormatter.formatDateSeparator(
+                          message['date'] as int,
+                        ),
+                      ),
+                    if (showUnreadDivider) const _UnreadDivider(),
+                    bubble,
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Whether [message] is the oldest one the user had not read when the chat
+  /// was opened, which is where the unread divider belongs.
+  bool _isFirstUnread(
+    Map<String, dynamic> message,
+    Map<String, dynamic>? older,
+  ) {
+    if (_lastReadOnOpen == 0) return false;
+    if (message['isOutgoing'] == true) return false;
+    final id = message['id'] as int? ?? 0;
+    if (id <= _lastReadOnOpen) return false;
+    return older == null || (older['id'] as int? ?? 0) <= _lastReadOnOpen;
+  }
+
+  Widget _buildBubble({
+    required Map<String, dynamic> message,
+    required bool isFirstInGroup,
+    required bool isLastInGroup,
+    required Set<int>? selection,
+  }) {
+    final chat = _chat.value;
+
+    if (message['isAlbum'] == true) {
+      return AlbumBubble(
+        albumMessages: AlbumsGrouper.membersOf(message),
+        chat: chat,
+        onLongPress: _onMessageLongPress,
+        onReactionTap: _toggleReaction,
+      );
+    }
+
+    return MessageBubble(
+      message: message,
+      chat: chat,
+      isFirstInGroup: isFirstInGroup,
+      isLastInGroup: isLastInGroup,
+      isSelected: selection?.contains(message['id']) ?? false,
+      onLongPress: _onMessageLongPress,
+      onTap: selection == null ? null : _toggleSelected,
+      onReactionTap: _toggleReaction,
+      onReplyTap: _jumpToMessage,
     );
   }
 
@@ -1198,10 +1701,6 @@ class _ChatPageState extends State<ChatPage> {
         if (pinned.isEmpty) return const SizedBox.shrink();
         final scheme = Theme.of(context).colorScheme;
         final message = pinned.first;
-        final content = message['content'];
-        final preview = content?['text']?['text'] ??
-            content?['caption']?['text'] ??
-            'Pinned message';
 
         return InkWell(
           onTap: () => _jumpToMessage(message['id'] as int),
@@ -1210,7 +1709,8 @@ class _ChatPageState extends State<ChatPage> {
             decoration: BoxDecoration(
               color: scheme.surface,
               border: Border(
-                bottom: BorderSide(color: scheme.onSurface.withValues(alpha: 0.1)),
+                bottom:
+                    BorderSide(color: scheme.onSurface.withValues(alpha: 0.1)),
               ),
             ),
             child: Row(
@@ -1240,7 +1740,7 @@ class _ChatPageState extends State<ChatPage> {
                         ),
                       ),
                       Text(
-                        preview.toString(),
+                        messagePreviewText(message),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1291,18 +1791,16 @@ class _ChatPageState extends State<ChatPage> {
                   itemCount: results.length,
                   itemBuilder: (context, index) {
                     final message = results[index];
-                    final content = message['content'];
-                    final preview = content?['text']?['text'] ??
-                        content?['caption']?['text'] ??
-                        'Message';
                     return ListTile(
                       title: Text(
-                        preview.toString(),
+                        messagePreviewText(message),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
-                        MessageFormatter.formatDateSeparator(message['date']),
+                        MessageFormatter.formatDateSeparator(
+                          message['date'] as int,
+                        ),
                       ),
                       onTap: () => _jumpToMessage(message['id'] as int),
                     );
@@ -1315,448 +1813,27 @@ class _ChatPageState extends State<ChatPage> {
       },
     );
   }
+}
 
-  /// A compact preview of the message being edited, shown above the composer;
-  /// hidden when no edit is in progress. Closing it cancels the edit and clears
-  /// the prefilled text.
-  Widget _buildEditPreview() {
-    return ValueListenableBuilder<Map<String, dynamic>?>(
-      valueListenable: _editing,
-      builder: (context, editing, child) {
-        if (editing == null) return const SizedBox.shrink();
-
-        final scheme = Theme.of(context).colorScheme;
-        final content = editing['content'];
-        final preview = content?['text']?['text'] ??
-            content?['caption']?['text'] ??
-            'Message';
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
-            children: [
-              Icon(Icons.edit, size: 18, color: scheme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Edit message',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.primary,
-                      ),
-                    ),
-                    Text(
-                      preview.toString(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                iconSize: 20,
-                onPressed: () {
-                  _editing.value = null;
-                  _messageController.clear();
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  /// A compact preview of the message being replied to, shown above the
-  /// composer; hidden when no reply is pending.
-  Widget _buildReplyPreview() {
-    return ValueListenableBuilder<Map<String, dynamic>?>(
-      valueListenable: _replyTo,
-      builder: (context, replyTo, child) {
-        if (replyTo == null) return const SizedBox.shrink();
-
-        final scheme = Theme.of(context).colorScheme;
-        final content = replyTo['content'];
-        final preview = content?['text']?['text'] ??
-            content?['caption']?['text'] ??
-            'Message';
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(
-            children: [
-              Container(
-                width: 3,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: scheme.primary,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Reply',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: scheme.primary,
-                      ),
-                    ),
-                    Text(
-                      preview.toString(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                iconSize: 20,
-                onPressed: () => _replyTo.value = null,
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+/// The "Unread messages" rule marking where the user left off.
+class _UnreadDivider extends StatelessWidget {
+  const _UnreadDivider();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight),
-        child: ValueListenableBuilder<bool>(
-          valueListenable: _isSearching,
-          builder: (context, isSearching, child) {
-            if (isSearching) {
-              return AppBar(
-                leading: IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: _closeSearch,
-                ),
-                titleSpacing: 0,
-                title: TextField(
-                  controller: _searchController,
-                  autofocus: true,
-                  onChanged: _onSearchChanged,
-                  textInputAction: TextInputAction.search,
-                  decoration: const InputDecoration(
-                    hintText: 'Search messages...',
-                    border: InputBorder.none,
-                  ),
-                ),
-              );
-            }
-            return AppBar(
-              titleSpacing: 0,
-              title: ValueListenableBuilder<Map<String, dynamic>?>(
-                valueListenable: _chatUser,
-                builder: (context, user, child) {
-                  // Merge the resolved user into the chat so the avatar's
-                  // online/bot indicator and the profile screen see it; the
-                  // TDLib chat object itself carries no user.
-                  final chatWithUser = user == null
-                      ? widget.chat
-                      : {...widget.chat, 'user': user};
-                  return InkWell(
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            ChatProfilePage(chat: chatWithUser),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Hero(
-                          tag: 'chat_avatar_${widget.chat['id']}',
-                          child: ChatAvatar(chat: chatWithUser, radius: 20),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.chat['title'] ?? 'Chat',
-                                style: Theme.of(context).textTheme.titleMedium,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              ValueListenableBuilder<String?>(
-                                valueListenable: _typingAction,
-                                builder: (context, typing, _) {
-                                  if (typing != null) {
-                                    return Text(
-                                      typing,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color:
-                                            Theme.of(context).colorScheme.primary,
-                                      ),
-                                    );
-                                  }
-                                  final mutedStyle = TextStyle(
-                                    fontSize: 13,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  );
-                                  if (user != null) {
-                                    return Text(
-                                      MessageFormatter.getUserStatus(user),
-                                      style: mutedStyle,
-                                    );
-                                  }
-                                  if (widget.chat['supergroup'] != null) {
-                                    return Text(
-                                      "${NumberFormat('#,###', 'en_US').format(widget.chat['supergroup']['memberCount'] ?? 0)} subscribers",
-                                      style: mutedStyle,
-                                    );
-                                  }
-                                  return const SizedBox.shrink();
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      color: scheme.primaryContainer,
+      child: Center(
+        child: Text(
+          'Unread messages',
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: scheme.onPrimaryContainer,
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: _openSearch,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.call),
-                  onPressed: _startVoiceCall,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.more_vert),
-                  onPressed: () {},
-                ),
-              ],
-            );
-          },
         ),
       ),
-      body: Column(
-        children: [
-          _buildPinnedBanner(),
-          Expanded(
-            child: Stack(
-              children: [
-                ValueListenableBuilder(
-              valueListenable: _messages,
-              builder: (context, messages, child) {
-                return ValueListenableBuilder<bool>(
-                  valueListenable: _isLoading,
-                  builder: (context, isLoading, child) {
-                    if (messages.isEmpty && !isLoading) {
-                      return const EmptyState(
-                        icon: Icons.forum_outlined,
-                        title: 'No messages yet',
-                        subtitle: 'Send a message to start the conversation.',
-                        lottieAsset: 'assets/lottie/empty.json',
-                      );
-                    }
-
-                    return ListView.builder(
-                      controller: _scrollController,
-                      reverse: true,
-                      itemCount: messages.length + (isLoading ? 1 : 0),
-                      itemBuilder: (context, index) {
-                        if (isLoading && index == messages.length) {
-                          return const Padding(
-                            padding: EdgeInsets.all(16),
-                            child: Center(
-                              child: SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            ),
-                          );
-                        }
-
-                        if (messages.isEmpty) {
-                          return const SizedBox.shrink();
-                        }
-
-                        final messageIndex = index;
-                        final message = messages[messageIndex];
-
-                        final triggerIndex = 50;
-                        final isNearEnd = messageIndex >= messages.length - triggerIndex;
-
-                        if (isNearEnd && !isLoading && _hasMore.value) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            _loadBatch();
-                          });
-                        }
-
-                        // In a reverse list, lower indices are newer. "Older"
-                        // sits above (next index), "newer" below (prev index).
-                        final older = messageIndex + 1 < messages.length
-                            ? messages[messageIndex + 1]
-                            : null;
-                        final newer = messageIndex - 1 >= 0
-                            ? messages[messageIndex - 1]
-                            : null;
-
-                        final isFirstInGroup = !_sameGroup(message, older);
-                        final isLastInGroup = !_sameGroup(message, newer);
-
-                        final showDateSeparator = older == null ||
-                            !MessageFormatter.isSameDay(
-                              message['date'],
-                              older['date'],
-                            );
-
-                        final Widget bubble = message['isAlbum'] == true
-                            ? AlbumBubble(
-                                albumMessages: message['messages'],
-                                chat: widget.chat,
-                                onLongPress: _onMessageLongPress,
-                                onReactionTap: _toggleReaction,
-                              )
-                            : MessageBubble(
-                                message: message,
-                                chat: widget.chat,
-                                isFirstInGroup: isFirstInGroup,
-                                isLastInGroup: isLastInGroup,
-                                onLongPress: _onMessageLongPress,
-                                onReactionTap: _toggleReaction,
-                              );
-
-                        if (!showDateSeparator) return bubble;
-
-                        return Column(
-                          children: [
-                            DateSeparator(
-                              label: MessageFormatter.formatDateSeparator(
-                                message['date'],
-                              ),
-                            ),
-                            bubble,
-                          ],
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-                Positioned(
-                  right: 12,
-                  bottom: 12,
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: _showScrollToBottom,
-                    builder: (context, show, child) => AnimatedScale(
-                      scale: show ? 1 : 0,
-                      duration: const Duration(milliseconds: 150),
-                      curve: Curves.easeOut,
-                      child: FloatingActionButton.small(
-                        onPressed: _scrollToBottom,
-                        child: const Icon(Icons.keyboard_arrow_down),
-                      ),
-                    ),
-                  ),
-                ),
-                _buildSearchResults(),
-              ],
-            ),
-          ),
-          _buildMessageInput(),
-        ],
-      ),
-    );
-  }
-}
-
-/// A labelled action in the composer's selection bar.
-class _SelectionAction {
-  final String label;
-  final VoidCallback onPressed;
-
-  const _SelectionAction(this.label, this.onPressed);
-}
-
-/// A compact selection toolbar anchored just above the text selection, with its
-/// actions in a single horizontally scrolling row so it never overflows.
-class _SelectionFormatBar extends StatelessWidget {
-  final Offset anchor;
-  final double topInset;
-  final List<_SelectionAction> items;
-
-  const _SelectionFormatBar({
-    required this.anchor,
-    required this.topInset,
-    required this.items,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final top =
-        (anchor.dy - 54).clamp(topInset + 8, MediaQuery.of(context).size.height);
-
-    return Stack(
-      children: [
-        Positioned(
-          left: 8,
-          right: 8,
-          top: top,
-          child: Center(
-            child: Material(
-              elevation: 2,
-              borderRadius: BorderRadius.circular(8),
-              color: theme.colorScheme.surfaceContainerHighest,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final item in items)
-                      TextButton(
-                        onPressed: item.onPressed,
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          foregroundColor: theme.colorScheme.onSurface,
-                        ),
-                        child: Text(item.label),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

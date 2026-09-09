@@ -1,13 +1,15 @@
-import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:nullgram/pages/home/archive_page.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_view.dart';
-import 'package:nullgram/tdlib/constants.dart';
-import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/pages/home/widgets/connection_banner.dart';
+import 'package:nullgram/pages/home/widgets/new_chat_sheet.dart';
+import 'package:nullgram/services/chat_store.dart';
 import '../chat/chat_page.dart';
 import '../search/search_page.dart';
 import 'menu.dart';
 
+/// The chat list: one tab per chat folder, with the archive reachable from a
+/// row above the main list.
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -16,343 +18,62 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  final ValueNotifier<bool> isLoading = ValueNotifier(true);
-  final ValueNotifier<Map<int, Map<String, dynamic>>> chats = ValueNotifier({});
-  final ValueNotifier<List<Map<String, dynamic>>> folders = ValueNotifier([]);
-  int selectedFolderIndex = 0;
+  final ChatStore _store = ChatStore.instance;
+
+  /// One entry per tab. The first is the implicit "All chats" tab, which has no
+  /// folder id and therefore shows the whole main list.
+  List<({int? id, String title})> _tabs = const [(id: null, title: 'All')];
 
   TabController? _tabController;
-
-  final Map<int, bool> memberStatus = {};
-
-  final Map<int, dynamic> users = {};
-  final Map<int, dynamic> supergroups = {};
-
-  final Map<String, bool> _fileExistsCache = {};
-  final Map<String, Uint8List?> _miniThumbnailCache = {};
-
-  StreamSubscription<Map<String, dynamic>>? _chatSubscription;
-  StreamSubscription<Map<String, dynamic>>? _filesSubscription;
 
   @override
   void initState() {
     super.initState();
-    _loadChats();
-
-    _chatSubscription = TDLibClient.chatUpdates.listen((update) async {
-      if (!mounted) return;
-      final type = update['@type'];
-      switch (type) {
-        case updateNewChatConst:
-          final chatData = update['chat'];
-          final chatId = chatData['id'];
-
-          final user = users[chatId];
-          if (user != null) {
-            chatData["user"] = user;
-          }
-
-          final supergroup = supergroups[chatId];
-          if (supergroup != null) {
-            chatData["supergroup"] = supergroup;
-          }
-
-          var status = memberStatus[chatData['type']?["supergroupId"]] ?? true;
-          if (!status) return;
-
-          final photo = chatData['photo'];
-          if (photo != null &&
-              photo['small']?['local']?['path'] == "" &&
-              photo['small']?['remote']?['id'] != null) {
-            TDLibClient.downloadFile(fileId: photo['small']['id']).catchError((_) {});
-          }
-
-          final updatedChats = Map<int, Map<String, dynamic>>.from(chats.value);
-          updatedChats[chatId] = chatData;
-
-          _updateFolderUnreadCounts();
-
-          chats.value = updatedChats;
-          setState(() {});
-
-        case updateChatFoldersConst:
-          final chatFolders = update['chatFolders'] ?? [];
-
-          final allChatsFolder = {
-            'id': -1,
-            'name': {'text': 'All chats'},
-            'unreadCount': 0,
-          };
-
-          final newFolders = <Map<String, dynamic>>[allChatsFolder, ...chatFolders.map((folder) => {
-            'id': folder['id'],
-            'name': {'text': folder['name']['text']['text']},
-            'unreadCount': 0,
-          })];
-          
-          if (_tabController == null || _tabController!.length != newFolders.length) {
-            _tabController?.dispose();
-            _tabController = TabController(length: newFolders.length, vsync: this)
-              ..addListener(() {
-                selectedFolderIndex = _tabController!.index;
-              });
-          }
-          folders.value = newFolders;
-          _updateFolderUnreadCounts();
-
-          setState(() {});
-
-        case updateChatPositionConst:
-          final chatId = update['chatId'];
-          final position = update['position'];
-          final existingChat = chats.value[chatId];
-
-          if (existingChat != null) {
-            final positions = existingChat['positions'] ?? [];
-            final posIndex = positions.indexWhere(
-                    (p) => p['list']?['chatFolderId'] == position['list']?['chatFolderId']
-            );
-
-            if (posIndex != -1) {
-              positions[posIndex] = position;
-            } else {
-              positions.add(position);
-            }
-
-            final updatedChats = chats.value;
-            updatedChats[chatId] = {...existingChat, 'positions': positions};
-            chats.value = updatedChats;
-          }
-
-        case updateChatLastMessageConst:
-          final chatId = update['chatId'];
-          final lastMessage = update['lastMessage'];
-          final newPositions = update['positions'];
-          final existingChat = chats.value[chatId];
-
-          if (existingChat != null) {
-            final mergedPositions = List<Map<String, dynamic>>.from(
-                newPositions?.map((e) => e) ?? []
-            );
-
-            final existingPositions = existingChat['positions'];
-            if (existingPositions != null) {
-              for (final existingPos in existingPositions) {
-                final existingPosMap = existingPos;
-                if (!mergedPositions.any((p) =>
-                p['list']?['chatFolderId'] == existingPosMap['list']?['chatFolderId'])) {
-                  mergedPositions.add(existingPosMap);
-                }
-              }
-            }
-
-            final updatedChats = chats.value;
-            updatedChats[chatId] = {
-              ...existingChat,
-              'lastMessage': lastMessage,
-              'positions': mergedPositions,
-            };
-            chats.value = updatedChats;
-          }
-
-        case updateChatReadInboxConst:
-          final chatId = update['chatId'];
-          final existingChat = chats.value[chatId];
-          if (existingChat != null) {
-            final updatedChats =
-                Map<int, Map<String, dynamic>>.from(chats.value);
-            updatedChats[chatId] = {
-              ...existingChat,
-              'unreadCount': update['unreadCount'] ?? 0,
-              'lastReadInboxMessageId': update['lastReadInboxMessageId'],
-            };
-            chats.value = updatedChats;
-            _updateFolderUnreadCounts();
-            setState(() {});
-          }
-
-        case updateChatAddedToListConst:
-          final chatId = update['chatId'];
-          final folderId = update['chatList']?['chatFolderId'];
-          final existingChat = chats.value[chatId];
-
-          if (existingChat != null && folderId != null) {
-            final folderIds = existingChat['folderIds'] ?? [];
-
-            if (!folderIds.contains(folderId)) {
-              folderIds.add(folderId);
-              final updatedChats = chats.value;
-              updatedChats[chatId] = {...existingChat, 'folderIds': folderIds};
-              chats.value = updatedChats;
-            }
-          }
-
-        case updateSupergroupConst:
-          var isMember = true;
-          var type = update["supergroup"]["status"]["@type"];
-          if (type == "ChatMemberStatusLeft" ||
-              type == "ChatMemberStatusBanned") {
-            isMember = false;
-          }
-
-          final id = "-100${update["supergroup"]["id"]}";
-          supergroups[int.parse(id)] = update["supergroup"];
-          memberStatus[update["supergroup"]["id"]] = isMember;
-
-        case updateUserConst:
-          users[update["user"]["id"]] = update["user"];
-        case updateUserStatusConst:
-          final userId = update['userId'];
-          var user = users[userId];
-          if (user != null) {
-            user['status'] = update['status'];
-            
-            final updatedChats = chats.value;
-            for (final chatId in updatedChats.keys) {
-              final chat = updatedChats[chatId];
-              if (chat?['user']?['id'] == userId) {
-                updatedChats[chatId] = {
-                  ...?chat,
-                  'user': {
-                    ...chat?['user'],
-                    'status': update['status'],
-                  },
-                };
-              }
-            }
-            chats.value = updatedChats;
-          }
-      }
-    });
-
-    _filesSubscription = TDLibClient.filesUpdates.listen((update) async {
-      if (!mounted) return;
-      if (update['@type'] != updateFileConst) return;
-
-      final file = update['file'];
-      final fileId = file?['id'];
-      final path = file?['local']?['path'] as String?;
-      final isComplete = file?['local']?['isDownloadingCompleted'] == true;
-
-      // Only react to fully downloaded files; reacting to progress updates
-      // would risk rendering a partially written image.
-      if (fileId == null || !isComplete || path == null || path.isEmpty) {
-        return;
-      }
-
-      // Patch the freshly downloaded file back into any chat whose avatar
-      // references it. Without this the chat keeps its empty initial path and
-      // the avatar only appears after a restart (once it loads from the DB).
-      final updatedChats = Map<int, Map<String, dynamic>>.from(chats.value);
-      var changed = false;
-
-      for (final chatId in updatedChats.keys) {
-        final chat = updatedChats[chatId]!;
-        final small = chat['photo']?['small'];
-        if (small != null && small['id'] == fileId) {
-          final photo = Map<String, dynamic>.from(chat['photo']);
-          photo['small'] = file;
-          updatedChats[chatId] = {...chat, 'photo': photo};
-          _fileExistsCache[path] = true;
-          changed = true;
-        }
-      }
-
-      // Assign a new map instance so the ValueNotifier actually notifies its
-      // listeners; reusing the same reference would be a silent no-op.
-      if (changed) chats.value = updatedChats;
-    });
-  }
-
-  Future<void> _loadChats() async {
-    try {
-      // Recover chats TDLib already holds in memory. On a Dart hot restart the
-      // native session persists but won't re-push updateNewChat, so without
-      // this the list would come up empty until a full cold start.
-      await _syncLoadedChats();
-
-      while (true) {
-        var type = await TDLibClient.loadChats();
-        if (type != "Ok") break;
-
-        await Future.delayed(const Duration(seconds: 2));
-      }
-    } catch (e) {
-      logger.e('Failed to load chats: $e');
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  /// Pulls the chats currently loaded in TDLib's main list and merges them into
-  /// [chats]. Safe to call repeatedly; existing entries are simply refreshed.
-  Future<void> _syncLoadedChats() async {
-    final chatIds = await TDLibClient.getChats();
-    if (!mounted || chatIds.isEmpty) return;
-
-    final updatedChats = Map<int, Map<String, dynamic>>.from(chats.value);
-    for (final chatId in chatIds) {
-      final chat = await TDLibClient.getChat(chatId: chatId);
-      if (chat == null) continue;
-      _maybeDownloadChatPhoto(chat);
-      updatedChats[chatId] = chat;
-    }
-
-    if (!mounted) return;
-    chats.value = updatedChats;
-    _updateFolderUnreadCounts();
-    setState(() {});
-  }
-
-  /// Requests the small chat photo when it isn't downloaded yet.
-  void _maybeDownloadChatPhoto(Map<String, dynamic> chat) {
-    final photo = chat['photo'];
-    if (photo != null &&
-        photo['small']?['local']?['path'] == "" &&
-        photo['small']?['remote']?['id'] != null) {
-      TDLibClient.downloadFile(fileId: photo['small']['id'])
-          .catchError((_) {});
-    }
-  }
-
-  void _updateFolderUnreadCounts() {
-    final updatedFolders = folders.value;
-    
-    for (int i = 0; i < updatedFolders.length; i++) {
-      final folder = updatedFolders[i];
-      final folderId = folder['id'];
-      int unreadChatsCount = 0;
-      
-      for (final chat in chats.value.values) {
-        final chatUnreadCount = chat['unreadCount'] ?? 0;
-        if (chatUnreadCount > 0) {
-          if (folderId == -1) {
-            unreadChatsCount++;
-          } else {
-            final chatFolderIds = chat['folderIds'] ?? [];
-            if (chatFolderIds.contains(folderId)) {
-              unreadChatsCount++;
-            }
-          }
-        }
-      }
-      
-      updatedFolders[i] = {...folder, 'unreadCount': unreadChatsCount};
-    }
-    
-    folders.value = updatedFolders;
+    _store.addListener(_onStoreChanged);
+    _store.start();
+    _syncTabs();
   }
 
   @override
   void dispose() {
-    _chatSubscription?.cancel();
-    _filesSubscription?.cancel();
+    _store.removeListener(_onStoreChanged);
     _tabController?.dispose();
     super.dispose();
   }
 
+  void _onStoreChanged() {
+    if (!mounted) return;
+    _syncTabs();
+    setState(() {});
+  }
+
+  /// Rebuilds the tab list from the store's folders, recreating the controller
+  /// only when the number of tabs actually changed (recreating it on every
+  /// update would reset the selected tab).
+  void _syncTabs() {
+    final tabs = <({int? id, String title})>[
+      (id: null, title: 'All'),
+      for (final folder in _store.folders)
+        (id: folder['id'] as int, title: folder['title'] as String),
+    ];
+    _tabs = tabs;
+
+    if (_tabController?.length != tabs.length) {
+      final previousIndex = _tabController?.index ?? 0;
+      _tabController?.dispose();
+      _tabController = TabController(
+        length: tabs.length,
+        initialIndex: previousIndex.clamp(0, tabs.length - 1),
+        vsync: this,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hasFolders = _tabs.length > 1;
+    final controller = _tabController;
+
     return Scaffold(
       appBar: AppBar(
         leading: Builder(
@@ -361,51 +82,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: const Text('Nullgram'),
+        title: const ConnectionTitle(title: 'Nullgram'),
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const SearchPage()),
-            ),
+            tooltip: 'Search',
+            onPressed: _openSearch,
           ),
         ],
-        bottom: folders.value.isNotEmpty && _tabController != null
+        bottom: hasFolders && controller != null
             ? PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: ValueListenableBuilder<List<Map<String, dynamic>>>(
-              valueListenable: folders,
-              builder: (context, foldersList, child) {
-                return TabBar(
-                  controller: _tabController,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  indicatorSize: TabBarIndicatorSize.label,
-                  labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                  unselectedLabelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.normal),
-                  tabs: foldersList.map((folder) {
-                    final unreadCount = folder['unreadCount'] ?? 0;
-                    return Tab(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(folder['name']['text']),
-                          if (unreadCount > 0) ...[
-                            const SizedBox(width: 6),
-                            Badge(label: Text('$unreadCount')),
-                          ],
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-          ),
-        )
+                preferredSize: const Size.fromHeight(48),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TabBar(
+                    controller: controller,
+                    isScrollable: true,
+                    tabAlignment: TabAlignment.start,
+                    indicatorSize: TabBarIndicatorSize.label,
+                    tabs: [
+                      for (final tab in _tabs)
+                        Tab(child: _FolderTab(folderId: tab.id, title: tab.title)),
+                    ],
+                  ),
+                ),
+              )
             : null,
       ),
       drawer: const HomeMenu(),
@@ -414,48 +115,100 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         tooltip: 'New message',
         child: const Icon(Icons.edit_outlined),
       ),
-      body: folders.value.isEmpty || _tabController == null
-          ? ChatListView(
-        chatsNotifier: chats,
-        folderId: null,
-        fileExistsCache: _fileExistsCache,
-        miniThumbnailCache: _miniThumbnailCache,
-        onChatTap: _openChat,
-        isLoading: isLoading,
-      )
-          : TabBarView(
-        controller: _tabController,
-        children: folders.value.map((folder) {
-          return ChatListView(
-            chatsNotifier: chats,
-            folderId: folder['id'] == -1 ? null : folder['id'],
-            fileExistsCache: _fileExistsCache,
-            miniThumbnailCache: _miniThumbnailCache,
-            onChatTap: _openChat,
-            isLoading: isLoading,
-          );
-        }).toList(),
+      body: hasFolders && controller != null
+          ? TabBarView(
+              controller: controller,
+              children: [
+                for (final tab in _tabs)
+                  ChatListView(
+                    folderId: tab.id,
+                    onChatTap: _openChat,
+                    header: tab.id == null ? _archiveHeader() : null,
+                  ),
+              ],
+            )
+          : ChatListView(
+              onChatTap: _openChat,
+              header: _archiveHeader(),
+            ),
+    );
+  }
+
+  /// The archive entry row, or null when the archive is empty (Telegram hides
+  /// it entirely in that case).
+  Widget? _archiveHeader() {
+    if (!_store.hasArchivedChats) return null;
+    return _ArchiveRow(
+      unreadCount: _store.unreadChatCount(kind: ChatListKind.archive),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const ArchivePage()),
       ),
     );
   }
 
-  /// Opens search as the entry point for starting a new conversation.
-  void _composeNewChat() {
+  void _openSearch() => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const SearchPage()),
+      );
+
+  void _composeNewChat() => showNewChatSheet(context);
+
+  void _openChat(int chatId) {
+    final chat = _store.chat(chatId);
+    if (chat == null) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const SearchPage()),
+      MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
     );
   }
+}
 
-  void _openChat(int chatID) {
-    final chatData = chats.value[chatID];
-    if (chatData != null) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChatPage(chat: chatData),
-        ),
-      );
-    }
+/// A folder tab label with its unread-chat badge.
+class _FolderTab extends StatelessWidget {
+  const _FolderTab({required this.folderId, required this.title});
+
+  final int? folderId;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = ChatStore.instance.unreadChatCount(
+      kind: ChatListKind.main,
+      folderId: folderId,
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(title),
+        if (count > 0) ...[
+          const SizedBox(width: 6),
+          Badge(label: Text('$count')),
+        ],
+      ],
+    );
+  }
+}
+
+/// The row above the main list that opens the archive.
+class _ArchiveRow extends StatelessWidget {
+  const _ArchiveRow({required this.unreadCount, required this.onTap});
+
+  final int unreadCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListTile(
+      leading: CircleAvatar(
+        radius: 20,
+        backgroundColor: scheme.surfaceContainerHighest,
+        child: Icon(Icons.archive_outlined, color: scheme.onSurfaceVariant),
+      ),
+      title: const Text('Archived chats'),
+      trailing: unreadCount > 0 ? Badge(label: Text('$unreadCount')) : null,
+      onTap: onTap,
+    );
   }
 }

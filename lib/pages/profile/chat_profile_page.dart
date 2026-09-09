@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/profile/widgets/profile_header_sliver.dart';
 import 'package:nullgram/pages/profile/widgets/profile_info_tile.dart';
+import 'package:nullgram/services/call_service.dart';
+import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
-/// A profile screen for a chat: large avatar, title, and details such as a
-/// user's bio/phone or a supergroup's member count.
+/// A profile screen for a chat: large avatar, title, quick actions and details
+/// such as a user's bio and phone or a group's description and invite link.
 class ChatProfilePage extends StatefulWidget {
   final Map<String, dynamic> chat;
 
@@ -22,19 +25,38 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
   final ValueNotifier<Map<String, dynamic>?> _userFullInfo =
       ValueNotifier(null);
 
+  /// Extended info for a group or channel: description and invite link.
+  final ValueNotifier<Map<String, dynamic>?> _groupFullInfo =
+      ValueNotifier(null);
+
+  final ValueNotifier<bool> _isMuted = ValueNotifier(false);
+
   @override
   void initState() {
     super.initState();
+    _isMuted.value = isChatMuted(widget.chat);
+
     final userId = _chatUserId();
     if (userId != null) {
-      // chat has no embedded user; resolve it (and its full info) from TDLib.
+      // A chat has no embedded user; resolve it (and its full info) from TDLib.
       TDLibClient.getUser(userId: userId).then((user) {
         if (mounted) _user.value = user;
       }).catchError((_) {});
       TDLibClient.getUserFullInfo(userId: userId).then((info) {
         if (mounted) _userFullInfo.value = info;
       }).catchError((_) {});
+      return;
     }
+    _loadGroupInfo();
+  }
+
+  @override
+  void dispose() {
+    _user.dispose();
+    _userFullInfo.dispose();
+    _groupFullInfo.dispose();
+    _isMuted.dispose();
+    super.dispose();
   }
 
   /// The user id behind a private/secret chat, read from the chat's type.
@@ -47,21 +69,39 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
     return null;
   }
 
-  @override
-  void dispose() {
-    _user.dispose();
-    _userFullInfo.dispose();
-    super.dispose();
+  Future<void> _loadGroupInfo() async {
+    final type = widget.chat['type'];
+    final info = switch (type?['@type']) {
+      'ChatTypeBasicGroup' => await TDLibClient.getBasicGroupFullInfo(
+          basicGroupId: type['basicGroupId'] as int,
+        ),
+      'ChatTypeSupergroup' => await TDLibClient.getSupergroupFullInfo(
+          supergroupId: type['supergroupId'] as int,
+        ),
+      _ => null,
+    };
+    if (mounted) _groupFullInfo.value = info;
+  }
+
+  Future<void> _toggleMute() async {
+    final muted = _isMuted.value;
+    _isMuted.value = !muted;
+    await TDLibClient.setChatNotificationSettings(
+      chatId: widget.chat['id'] as int,
+      muteFor: muted ? 0 : TDLibClient.muteForever,
+    );
   }
 
   String? _subtitle(Map<String, dynamic>? user) {
     if (user != null) return MessageFormatter.getUserStatus(user);
     final supergroup = widget.chat['supergroup'];
     if (supergroup != null) {
-      final count = supergroup['memberCount'] ?? 0;
+      final count = supergroup['memberCount'] as int? ?? 0;
       final label = supergroup['isChannel'] == true ? 'subscribers' : 'members';
       return '${NumberFormat('#,###', 'en_US').format(count)} $label';
     }
+    final members = _groupFullInfo.value?['members'] as List?;
+    if (members != null) return '${members.length} members';
     return null;
   }
 
@@ -79,7 +119,6 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                   ? activeUsernames.first as String?
                   : null;
           final title = widget.chat['title'] as String? ?? 'Chat';
-          final subtitle = _subtitle(user);
 
           final chatWithUser =
               user == null ? widget.chat : {...widget.chat, 'user': user};
@@ -93,10 +132,21 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
               ProfileHeaderSliver(
                 chat: chatWithUser,
                 title: title,
-                subtitle: subtitle,
+                subtitle: _subtitle(user),
+                actions: [
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _isMuted,
+                    builder: (context, muted, child) => IconButton(
+                      icon: Icon(muted ? Icons.volume_off : Icons.volume_up),
+                      tooltip: muted ? 'Unmute' : 'Mute',
+                      onPressed: _toggleMute,
+                    ),
+                  ),
+                ],
               ),
               SliverList(
                 delegate: SliverChildListDelegate([
+                  if (user != null) _QuickActions(userId: user['id'] as int),
                   if (phoneValue != null || username != null)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -140,12 +190,108 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                       );
                     },
                   ),
+                  ValueListenableBuilder<Map<String, dynamic>?>(
+                    valueListenable: _groupFullInfo,
+                    builder: (context, info, child) => _GroupDetails(
+                      info: info,
+                      chatId: widget.chat['id'] as int,
+                    ),
+                  ),
                   const SizedBox(height: 24),
                 ]),
               ),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Call and add-contact actions for a private chat.
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({required this.userId});
+
+  final int userId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: FilledButton.tonalIcon(
+              onPressed: () =>
+                  callService.startCall(userId: userId, isVideo: false),
+              icon: const Icon(Icons.call),
+              label: const Text('Call'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: FilledButton.tonalIcon(
+              onPressed: () =>
+                  callService.startCall(userId: userId, isVideo: true),
+              icon: const Icon(Icons.videocam),
+              label: const Text('Video'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A group's or channel's description and invite link.
+class _GroupDetails extends StatelessWidget {
+  const _GroupDetails({required this.info, required this.chatId});
+
+  final Map<String, dynamic>? info;
+  final int chatId;
+
+  @override
+  Widget build(BuildContext context) {
+    final description = info?['description'] as String?;
+    final inviteLink = info?['inviteLink']?['inviteLink'] as String?;
+
+    if ((description == null || description.isEmpty) &&
+        (inviteLink == null || inviteLink.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Card(
+        child: Column(
+          children: [
+            if (description != null && description.isNotEmpty)
+              ProfileInfoTile(
+                icon: Icons.info_outline,
+                label: 'About',
+                value: description,
+              ),
+            if (inviteLink != null && inviteLink.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.link),
+                title: Text(inviteLink),
+                subtitle: const Text('Invite link'),
+                trailing: IconButton(
+                  icon: const Icon(Icons.copy),
+                  tooltip: 'Copy link',
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      ClipboardData(text: inviteLink),
+                    );
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Invite link copied')),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

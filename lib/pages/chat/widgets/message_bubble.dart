@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/pages/chat/utils/sender_names.dart';
 import 'package:nullgram/theme/app_theme.dart';
 import 'message_animation.dart';
 import 'message_audio.dart';
@@ -7,6 +8,7 @@ import 'message_document.dart';
 import 'message_location.dart';
 import 'message_photo.dart';
 import 'message_poll.dart';
+import 'message_reply.dart';
 import 'message_service.dart';
 import 'message_reactions.dart';
 import 'message_sender_avatar.dart';
@@ -27,12 +29,23 @@ class MessageBubble extends StatelessWidget {
   final bool isFirstInGroup;
   final bool isLastInGroup;
 
+  /// Whether the message is part of the current selection, which the chat
+  /// draws as a tinted row.
+  final bool isSelected;
+
   /// Called when the bubble is long-pressed, to open the context menu.
   final void Function(Map<String, dynamic> message)? onLongPress;
+
+  /// Called when the bubble is tapped. Only wired while a selection is active,
+  /// so a plain tap does nothing in normal reading.
+  final void Function(Map<String, dynamic> message)? onTap;
 
   /// Called when a reaction chip is tapped, to toggle that reaction.
   final void Function(Map<String, dynamic> message, String emoji)?
       onReactionTap;
+
+  /// Called with the id of the message a reply quote points at.
+  final void Function(int messageId)? onReplyTap;
 
   const MessageBubble({
     super.key,
@@ -40,8 +53,11 @@ class MessageBubble extends StatelessWidget {
     required this.chat,
     this.isFirstInGroup = true,
     this.isLastInGroup = true,
+    this.isSelected = false,
     this.onLongPress,
+    this.onTap,
     this.onReactionTap,
+    this.onReplyTap,
   });
 
   /// Non-media content types rendered explicitly in the bubble's text branch.
@@ -57,17 +73,29 @@ class MessageBubble extends StatelessWidget {
     'MessageDice',
   };
 
-  Widget _buildMediaContent(Map<String, dynamic> content, int messageId) {
-    final contentType = content['@type'];
+  static const _mediaTypes = {
+    'MessagePhoto',
+    'MessageVideo',
+    'MessageAudio',
+    'MessageVoiceNote',
+    'MessageDocument',
+    'MessageSticker',
+    'MessageAnimation',
+  };
 
-    switch (contentType) {
+  Widget _buildMediaContent(Map<String, dynamic> content, int messageId) {
+    switch (content['@type']) {
       case 'MessagePhoto':
         return MessagePhoto(content: content, messageId: messageId);
       case 'MessageVideo':
         return MessageVideo(content: content);
       case 'MessageAudio':
       case 'MessageVoiceNote':
-        return MessageAudio(content: content);
+        return MessageAudio(
+          content: content,
+          chatId: chat['id'] as int,
+          messageId: messageId,
+        );
       case 'MessageDocument':
         return MessageDocument(content: content);
       case 'MessageSticker':
@@ -99,86 +127,99 @@ class MessageBubble extends StatelessWidget {
     if (serviceText != null) return ServiceMessage(text: serviceText);
 
     final scheme = Theme.of(context).colorScheme;
-    final isOutgoing = message['isOutgoing'] ?? false;
-    final contentType = content['@type'];
-    final hasCaption = content['caption']?['text'] != null &&
-        content['caption']['text'].toString().isNotEmpty;
-
-    final hasMedia = contentType == 'MessagePhoto' ||
-        contentType == 'MessageVideo' ||
-        contentType == 'MessageAudio' ||
-        contentType == 'MessageVoiceNote' ||
-        contentType == 'MessageDocument' ||
-        contentType == 'MessageSticker' ||
-        contentType == 'MessageAnimation';
-
-    final isSupergroupChat = chat['supergroup'] != null;
-    final senderName =
-        (isSupergroupChat && !isOutgoing && isFirstInGroup) ? chat['title'] : null;
+    final isOutgoing = message['isOutgoing'] == true;
+    final contentType = content['@type'] as String?;
+    final caption = content['caption']?['text'] as String?;
+    final hasCaption = caption != null && caption.isNotEmpty;
+    final hasMedia = _mediaTypes.contains(contentType);
 
     // Group chats (basic groups and non-channel supergroups) show a sender
-    // avatar beside incoming messages; private chats and channels do not.
+    // name and avatar beside incoming messages; private chats and channels do
+    // not, because the sender is implied by the chat itself.
     final chatType = chat['type']?['@type'];
     final isGroupChat = chatType == 'ChatTypeBasicGroup' ||
-        (chatType == 'ChatTypeSupergroup' && chat['type']?['isChannel'] != true);
+        (chatType == 'ChatTypeSupergroup' &&
+            chat['type']?['isChannel'] != true);
+    final showSenderName = isGroupChat && !isOutgoing && isFirstInGroup;
     final showAvatar = isGroupChat && !isOutgoing;
     const double avatarRadius = 16;
 
     final radius = _bubbleRadius(isOutgoing);
     final chatColors = context.chatColors;
-    final bubbleColor = isOutgoing
-        ? chatColors.outgoingBubble
-        : chatColors.incomingBubble;
+    final bubbleColor =
+        isOutgoing ? chatColors.outgoingBubble : chatColors.incomingBubble;
 
-    final margin = EdgeInsets.only(
-      left: 12,
-      right: 12,
-      top: isFirstInGroup ? 8 : 2,
-      bottom: 1,
-    );
+    final replyTo = message['replyTo'] as Map<String, dynamic>?;
+    final isReply = replyTo?['@type'] == 'MessageReplyToMessage';
+    final isForward = message['forwardInfo'] != null;
 
-    final shadow = [
-      BoxShadow(
-        color: scheme.shadow.withValues(alpha: 0.05),
-        blurRadius: 2,
-        offset: const Offset(0, 1),
-      ),
+    // Everything that sits above the message's own content, in Telegram's
+    // order: who sent it, where it was forwarded from, what it replies to.
+    final prefix = <Widget>[
+      if (showSenderName)
+        _SenderLabel(senderId: message['senderId'], chatId: chat['id'] as int),
+      if (isForward) ForwardHeader(message: message),
+      if (isReply)
+        ReplyQuote(
+          replyTo: replyTo!,
+          chatId: chat['id'] as int,
+          onTap: onReplyTap ?? (_) {},
+        ),
     ];
 
-    final senderLabel = senderName == null
-        ? null
-        : Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: Text(
-              senderName,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: scheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          );
+    final meta = InteractionInfo(
+      message: message,
+      isOutgoing: isOutgoing,
+      lastReadOutboxMessageId:
+          chat['lastReadOutboxMessageId'] as int? ?? 0,
+    );
+
+    final decoration = BoxDecoration(
+      color: bubbleColor,
+      borderRadius: radius,
+      boxShadow: [
+        BoxShadow(
+          color: scheme.shadow.withValues(alpha: 0.05),
+          blurRadius: 2,
+          offset: const Offset(0, 1),
+        ),
+      ],
+      border: Border.all(color: chatColors.bubbleBorder),
+    );
 
     final Widget bubbleContent;
 
     if (hasMedia && !hasCaption) {
+      // Bare media: the timestamp sits below the bubble so it never covers the
+      // image, and the media fills the bubble unless a prefix pushes it down.
       bubbleContent = Column(
         crossAxisAlignment:
             isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           Container(
-            decoration: BoxDecoration(
-              color: bubbleColor,
-              borderRadius: radius,
-              boxShadow: shadow,
-              border: Border.all(color: chatColors.bubbleBorder),
-            ),
+            decoration: decoration,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (senderLabel != null) senderLabel,
+                if (prefix.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: prefix,
+                    ),
+                  ),
                 ClipRRect(
-                  borderRadius: radius,
-                  child: _buildMediaContent(content, message['id']),
+                  borderRadius: prefix.isEmpty
+                      ? radius
+                      : BorderRadius.circular(12),
+                  child: Padding(
+                    padding: prefix.isEmpty
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.fromLTRB(4, 0, 4, 4),
+                    child: _buildMediaContent(content, message['id'] as int),
+                  ),
                 ),
               ],
             ),
@@ -186,46 +227,49 @@ class MessageBubble extends StatelessWidget {
           if (isLastInGroup)
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
-              child: InteractionInfo(message: message, isOutgoing: isOutgoing),
+              child: meta,
             ),
         ],
       );
     } else if (hasMedia) {
       bubbleContent = Container(
-        decoration: BoxDecoration(
-          color: bubbleColor,
-          borderRadius: radius,
-          boxShadow: shadow,
-          border: Border.all(color: chatColors.bubbleBorder),
-        ),
+        decoration: decoration,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (senderLabel != null) senderLabel,
-            ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(18),
-                topRight: Radius.circular(18),
+            if (prefix.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: prefix,
+                ),
               ),
-              child: _buildMediaContent(content, message['id']),
+            ClipRRect(
+              borderRadius: prefix.isEmpty
+                  ? const BorderRadius.only(
+                      topLeft: Radius.circular(18),
+                      topRight: Radius.circular(18),
+                    )
+                  : BorderRadius.circular(12),
+              child: Padding(
+                padding: prefix.isEmpty
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.symmetric(horizontal: 4),
+                child: _buildMediaContent(content, message['id'] as int),
+              ),
             ),
             Container(
               constraints: const BoxConstraints(minWidth: double.infinity),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   MessageText(content: content['caption']),
                   const SizedBox(height: 4),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: InteractionInfo(
-                      message: message,
-                      isOutgoing: isOutgoing,
-                    ),
-                  ),
+                  Align(alignment: Alignment.centerRight, child: meta),
                 ],
               ),
             ),
@@ -236,27 +280,12 @@ class MessageBubble extends StatelessWidget {
       bubbleContent = IntrinsicWidth(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: bubbleColor,
-            borderRadius: radius,
-            boxShadow: shadow,
-            border: Border.all(color: chatColors.bubbleBorder),
-          ),
+          decoration: decoration,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (senderName != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    senderName,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: scheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                ),
+              ...prefix,
               if (contentType == 'MessageText')
                 MessageText(content: content['text']),
               if (contentType == 'MessageLocation' ||
@@ -293,13 +322,7 @@ class MessageBubble extends StatelessWidget {
                 ),
               if (isLastInGroup) ...[
                 const SizedBox(height: 4),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: InteractionInfo(
-                    message: message,
-                    isOutgoing: isOutgoing,
-                  ),
-                ),
+                Align(alignment: Alignment.centerRight, child: meta),
               ],
             ],
           ),
@@ -331,6 +354,13 @@ class MessageBubble extends StatelessWidget {
             ),
         ],
       ),
+    );
+
+    final margin = EdgeInsets.only(
+      left: 12,
+      right: 12,
+      top: isFirstInGroup ? 8 : 2,
+      bottom: 1,
     );
 
     final Widget aligned;
@@ -371,12 +401,80 @@ class MessageBubble extends StatelessWidget {
 
     return GestureDetector(
       onLongPress: onLongPress == null ? null : () => onLongPress!(message),
+      onTap: onTap == null ? null : () => onTap!(message),
       behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: showAvatar
-            ? EdgeInsets.only(top: isFirstInGroup ? 8 : 2, bottom: 1)
-            : EdgeInsets.zero,
-        child: aligned,
+      child: ColoredBox(
+        color: isSelected
+            ? scheme.primary.withValues(alpha: 0.12)
+            : Colors.transparent,
+        child: Padding(
+          padding: showAvatar
+              ? EdgeInsets.only(top: isFirstInGroup ? 8 : 2, bottom: 1)
+              : EdgeInsets.zero,
+          child: aligned,
+        ),
+      ),
+    );
+  }
+}
+
+/// The sender's name above their first message in a group run.
+///
+/// Resolved asynchronously and coloured per sender, so a busy group stays
+/// readable. Renders nothing until the name is known rather than flashing a
+/// placeholder.
+class _SenderLabel extends StatefulWidget {
+  const _SenderLabel({required this.senderId, required this.chatId});
+
+  final dynamic senderId;
+  final int chatId;
+
+  @override
+  State<_SenderLabel> createState() => _SenderLabelState();
+}
+
+class _SenderLabelState extends State<_SenderLabel> {
+  String? _name;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = SenderNames.cached(widget.senderId);
+    if (_name == null) _resolve();
+  }
+
+  Future<void> _resolve() async {
+    final name = await SenderNames.resolve(widget.senderId);
+    if (name != null && mounted) setState(() => _name = name);
+  }
+
+  /// A stable id for colouring, so the same person keeps the same colour.
+  int get _colorSeed {
+    final senderId = widget.senderId;
+    if (senderId is Map) {
+      return (senderId['userId'] ?? senderId['chatId'] ?? widget.chatId) as int;
+    }
+    return widget.chatId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _name;
+    if (name == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: context.chatColors.senderNameColor(
+                _colorSeed,
+                Theme.of(context).brightness,
+              ),
+              fontWeight: FontWeight.w600,
+            ),
       ),
     );
   }

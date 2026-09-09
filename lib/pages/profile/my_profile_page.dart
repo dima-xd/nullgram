@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:nullgram/pages/profile/widgets/profile_header_sliver.dart';
 import 'package:nullgram/pages/profile/widgets/profile_info_tile.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
@@ -79,6 +80,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
               ProfileHeaderSliver(
                 chat: _avatarChat(me),
                 title: _fullName(me),
+                subtitle: username != null ? '@$username' : null,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    tooltip: 'Change photo',
+                    onPressed: _changePhoto,
+                  ),
+                ],
               ),
               SliverList(
                 delegate: SliverChildListDelegate([
@@ -143,6 +152,15 @@ class _MyProfilePageState extends State<MyProfilePage> {
         },
       ),
     );
+  }
+
+  /// Picks an image and sets it as the account's profile photo.
+  Future<void> _changePhoto() async {
+    final file = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+    );
+    if (file == null) return;
+    await _run(() => TDLibClient.setProfilePhoto(path: file.path));
   }
 
   Future<void> _editName(Map<String, dynamic> me) async {
