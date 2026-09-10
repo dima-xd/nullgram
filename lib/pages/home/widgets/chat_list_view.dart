@@ -4,6 +4,7 @@ import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
 import 'chat_actions_sheet.dart';
 import 'chat_list_item.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// A scrolling chat list backed by [ChatStore].
 ///
@@ -40,11 +41,11 @@ class ChatListView extends StatelessWidget {
           return Column(
             children: [
               if (header != null) header!,
-              const Expanded(
+              Expanded(
                 child: EmptyState(
                   icon: Icons.forum_outlined,
-                  title: 'No chats yet',
-                  subtitle: 'Your conversations will appear here.',
+                  title: context.l10n.noChatsYet,
+                  subtitle: context.l10n.chatsEmptyHint,
                   lottieAsset: 'assets/lottie/empty.json',
                 ),
               ),

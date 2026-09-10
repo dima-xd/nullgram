@@ -3,6 +3,7 @@ import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Presents a bottom sheet listing the user's chats and resolves to the chat
 /// id chosen as a forward destination, or null if dismissed.
@@ -74,11 +75,11 @@ class _ForwardChatPickerState extends State<_ForwardChatPicker> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Forward to…', style: theme.textTheme.titleMedium),
+                  Text(context.l10n.forwardTo, style: theme.textTheme.titleMedium),
                   const SizedBox(height: 12),
                   SearchBar(
                     controller: _searchController,
-                    hintText: 'Search chats...',
+                    hintText: context.l10n.searchChatsHint,
                     leading: const Icon(Icons.search),
                     onChanged: (value) => _filter.value = value,
                   ),

@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:nullgram/theme/motion.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Actions offered by the message context menu.
 enum MessageMenuAction {
   reply,
   edit,
   copy,
+  translate,
   forward,
   select,
   copyLink,
+  info,
   pin,
   unpin,
   delete,
@@ -41,11 +44,13 @@ Future<MessageMenuResult?> showMessageContextMenu({
   bool canPin = false,
   bool isPinned = false,
   bool canCopyLink = false,
+  bool canTranslate = false,
+  bool canSeeInfo = false,
 }) {
   return showGeneralDialog<MessageMenuResult>(
     context: context,
     barrierDismissible: true,
-    barrierLabel: 'Message actions',
+    barrierLabel: context.l10n.messageActions,
     barrierColor:
         Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
     transitionDuration: const Duration(milliseconds: 150),
@@ -56,6 +61,8 @@ Future<MessageMenuResult?> showMessageContextMenu({
       canPin: canPin,
       isPinned: isPinned,
       canCopyLink: canCopyLink,
+      canTranslate: canTranslate,
+      canSeeInfo: canSeeInfo,
     ),
     transitionBuilder: (context, animation, _, child) {
       final curved = CurvedAnimation(parent: animation, curve: Curves.easeOut);
@@ -77,6 +84,8 @@ class _MessageMenu extends StatelessWidget {
   final bool canPin;
   final bool isPinned;
   final bool canCopyLink;
+  final bool canTranslate;
+  final bool canSeeInfo;
 
   const _MessageMenu({
     required this.availableReactions,
@@ -85,6 +94,8 @@ class _MessageMenu extends StatelessWidget {
     required this.canPin,
     required this.isPinned,
     required this.canCopyLink,
+    required this.canTranslate,
+    required this.canSeeInfo,
   });
 
   @override
@@ -101,6 +112,8 @@ class _MessageMenu extends StatelessWidget {
             canPin: canPin,
             isPinned: isPinned,
             canCopyLink: canCopyLink,
+            canTranslate: canTranslate,
+            canSeeInfo: canSeeInfo,
           ),
         ],
       ),
@@ -174,6 +187,8 @@ class _MenuList extends StatelessWidget {
   final bool canPin;
   final bool isPinned;
   final bool canCopyLink;
+  final bool canTranslate;
+  final bool canSeeInfo;
 
   const _MenuList({
     required this.canDelete,
@@ -181,6 +196,8 @@ class _MenuList extends StatelessWidget {
     required this.canPin,
     required this.isPinned,
     required this.canCopyLink,
+    required this.canTranslate,
+    required this.canSeeInfo,
   });
 
   @override
@@ -197,43 +214,59 @@ class _MenuList extends StatelessWidget {
           children: [
             _MenuItem(
               icon: Icons.reply,
-              label: 'Reply',
+              label: context.l10n.reply,
               onTap: () => Navigator.of(context)
                   .pop(const MessageMenuResult.action(MessageMenuAction.reply)),
             ),
             if (canEdit)
               _MenuItem(
                 icon: Icons.edit_outlined,
-                label: 'Edit',
+                label: context.l10n.edit,
                 onTap: () => Navigator.of(context)
                     .pop(const MessageMenuResult.action(MessageMenuAction.edit)),
               ),
             _MenuItem(
               icon: Icons.copy,
-              label: 'Copy',
+              label: context.l10n.copy,
               onTap: () => Navigator.of(context)
                   .pop(const MessageMenuResult.action(MessageMenuAction.copy)),
             ),
+            if (canTranslate)
+              _MenuItem(
+                icon: Icons.translate,
+                label: context.l10n.translate,
+                onTap: () => Navigator.of(context).pop(
+                  const MessageMenuResult.action(MessageMenuAction.translate),
+                ),
+              ),
             _MenuItem(
               icon: Icons.forward,
-              label: 'Forward',
+              label: context.l10n.forward,
               onTap: () => Navigator.of(context).pop(
                   const MessageMenuResult.action(MessageMenuAction.forward)),
             ),
 
             _MenuItem(
               icon: Icons.checklist,
-              label: 'Select',
+              label: context.l10n.select,
               onTap: () => Navigator.of(context).pop(
                   const MessageMenuResult.action(MessageMenuAction.select)),
             ),
             if (canCopyLink)
               _MenuItem(
                 icon: Icons.link,
-                label: 'Copy link',
+                label: context.l10n.copyLink,
                 onTap: () => Navigator.of(context).pop(
                     const MessageMenuResult.action(
                         MessageMenuAction.copyLink)),
+              ),
+            if (canSeeInfo)
+              _MenuItem(
+                icon: Icons.done_all,
+                label: context.l10n.reactionsAndViews,
+                onTap: () => Navigator.of(context).pop(
+                  const MessageMenuResult.action(MessageMenuAction.info),
+                ),
               ),
             if (canPin)
               _MenuItem(
@@ -247,7 +280,7 @@ class _MenuList extends StatelessWidget {
             if (canDelete)
               _MenuItem(
                 icon: Icons.delete_outline,
-                label: 'Delete',
+                label: context.l10n.delete,
                 color: scheme.error,
                 onTap: () => Navigator.of(context).pop(
                     const MessageMenuResult.action(MessageMenuAction.delete)),

@@ -6,17 +6,21 @@ import 'package:logger/logger.dart';
 import 'package:nullgram/main.dart';
 import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
+import 'package:nullgram/services/account_manager.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
 final _log = Logger();
 
-/// Shows a local notification for each incoming Telegram message.
+/// Shows a local notification for each incoming Telegram message, on every
+/// signed-in account.
 ///
-/// Listens to [TDLibClient.messsagesUpdates] for `updateNewMessage` and posts a
-/// notification unless the message is outgoing, its chat is muted, or its chat
-/// is the one currently open on screen. Tapping a notification opens the chat.
+/// The account on screen is fed by [TDLibClient.messsagesUpdates]; the others
+/// by [TDLibClient.backgroundUpdates], which is the whole point of keeping
+/// their clients online. A notification names its account whenever it did not
+/// come from the one on screen, and tapping it switches over before opening
+/// the chat.
 class NotificationService {
   NotificationService._();
 
@@ -30,6 +34,7 @@ class NotificationService {
   static const String _channelName = 'Messages';
 
   StreamSubscription<Map<String, dynamic>>? _subscription;
+  StreamSubscription<Map<String, dynamic>>? _backgroundSubscription;
 
   /// The chat currently open on screen, whose messages should not notify.
   /// Set by [ChatPage] while it is mounted.
@@ -38,8 +43,8 @@ class NotificationService {
   AndroidFlutterLocalNotificationsPlugin? _android;
 
   /// Whether each notification scope is muted by default, cached after the
-  /// first lookup. A scope default rarely changes and would otherwise cost a
-  /// bridge round trip per incoming message.
+  /// first lookup and keyed by account: a scope default rarely changes and
+  /// would otherwise cost a bridge round trip per incoming message.
   final Map<String, bool> _scopeMuted = {};
 
   /// Initializes the plugin, the Android notification channel, and runtime
@@ -63,6 +68,13 @@ class NotificationService {
         importance: Importance.high,
       ),
     );
+
+    // Background accounts notify for as long as the app runs, independently of
+    // which account is signed in on screen, so this subscription is never
+    // stopped by a switch.
+    _backgroundSubscription ??=
+        TDLibClient.backgroundUpdates.listen(_onBackgroundUpdate);
+
     _log.i('NotificationService initialized');
   }
 
@@ -74,14 +86,36 @@ class NotificationService {
     _log.i('Notifications permission granted=$granted enabled=$enabled');
   }
 
-  /// Starts listening for incoming messages. Call once the user is authorized.
+  /// Starts listening for the active account's incoming messages. Call once
+  /// the user is authorized.
   void start() {
     if (_subscription != null) return;
     _subscription = TDLibClient.messsagesUpdates.listen(_onMessagesUpdate);
     _log.i('NotificationService started listening');
   }
 
-  Future<void> _onMessagesUpdate(Map<String, dynamic> update) async {
+  /// Stops listening to the active account, before a switch replaces it.
+  ///
+  /// The account left behind keeps notifying through the background stream, so
+  /// nothing is lost by dropping this subscription.
+  void stop() {
+    _subscription?.cancel();
+    _subscription = null;
+  }
+
+  Future<void> _onMessagesUpdate(Map<String, dynamic> update) =>
+      _onNewMessage(update, TDLibClient.activeAccountId);
+
+  Future<void> _onBackgroundUpdate(Map<String, dynamic> update) async {
+    final accountId = update['@accountId'] as int?;
+    if (accountId == null) return;
+    await _onNewMessage(update, accountId);
+  }
+
+  Future<void> _onNewMessage(
+    Map<String, dynamic> update,
+    int accountId,
+  ) async {
     try {
       if (update['@type'] != updateNewMessageConst) return;
 
@@ -89,26 +123,48 @@ class NotificationService {
       if (message == null || message['isOutgoing'] == true) return;
 
       final chatId = message['chatId'] as int?;
-      if (chatId == null || chatId == activeChatId) return;
+      if (chatId == null) return;
+      // Only the account on screen can have a chat open on screen.
+      final isActive = accountId == TDLibClient.activeAccountId;
+      if (isActive && chatId == activeChatId) return;
 
-      final chat = ChatStore.instance.chat(chatId) ??
-          await TDLibClient.getChat(chatId: chatId);
+      final chat = await _chat(chatId, accountId);
       if (chat == null) {
         _log.w('Notification skipped: chat $chatId is unknown');
         return;
       }
 
-      if (await _isMuted(chat)) return;
+      if (await _isMuted(chat, accountId)) return;
 
-      final title = chat['title'] as String? ?? 'New message';
       await _show(
+        accountId: accountId,
         chatId: chatId,
-        title: title,
-        body: await _buildBody(message, chat),
+        title: chat['title'] as String? ?? 'New message',
+        body: await _buildBody(message, chat, accountId),
+        accountName: isActive ? null : _accountName(accountId),
       );
     } catch (e, s) {
       _log.e('Failed to show notification', error: e, stackTrace: s);
     }
+  }
+
+  /// Resolves a chat, using the in-memory store only for the active account.
+  ///
+  /// [ChatStore] describes the account on screen; asking it about another
+  /// account's chat id would answer with an unrelated chat.
+  Future<Map<String, dynamic>?> _chat(int chatId, int accountId) async {
+    if (accountId == TDLibClient.activeAccountId) {
+      final cached = ChatStore.instance.chat(chatId);
+      if (cached != null) return cached;
+    }
+    return TDLibClient.getChat(chatId: chatId, accountId: accountId);
+  }
+
+  /// The display name of an account, for a notification that did not come from
+  /// the one on screen.
+  String? _accountName(int accountId) {
+    final name = AccountManager.instance.accountOf(accountId)?.name;
+    return name == null || name.isEmpty ? null : name;
   }
 
   /// Whether the chat should stay silent.
@@ -116,21 +172,23 @@ class NotificationService {
   /// A chat can be muted on its own, or inherit the mute state of its scope
   /// (private chats / groups / channels) — TDLib signals the latter with
   /// `useDefaultMuteFor`, in which case its own `muteFor` is meaningless.
-  Future<bool> _isMuted(Map<String, dynamic> chat) async {
+  Future<bool> _isMuted(Map<String, dynamic> chat, int accountId) async {
     final settings = chat['notificationSettings'];
     if (settings?['useDefaultMuteFor'] != true) {
       return (settings?['muteFor'] as int? ?? 0) > 0;
     }
 
     final scope = _scopeOf(chat);
-    final cached = _scopeMuted[scope];
+    final key = '$accountId:$scope';
+    final cached = _scopeMuted[key];
     if (cached != null) return cached;
 
     final defaults = await TDLibClient.getScopeNotificationSettings(
       scope: scope,
+      accountId: accountId,
     );
     final muted = (defaults?['muteFor'] as int? ?? 0) > 0;
-    _scopeMuted[scope] = muted;
+    _scopeMuted[key] = muted;
     return muted;
   }
 
@@ -150,6 +208,7 @@ class NotificationService {
   Future<String> _buildBody(
     Map<String, dynamic> message,
     Map<String, dynamic> chat,
+    int accountId,
   ) async {
     final preview = messagePreviewText(message);
 
@@ -159,18 +218,21 @@ class NotificationService {
             chat['type']?['isChannel'] != true);
     if (!isGroup) return preview;
 
-    final sender = await _senderName(message['senderId']);
+    final sender = await _senderName(message['senderId'], accountId);
     return sender == null || sender.isEmpty ? preview : '$sender: $preview';
   }
 
   /// Resolves the display name of a message sender (a user or a chat).
-  Future<String?> _senderName(dynamic senderId) async {
+  Future<String?> _senderName(dynamic senderId, int accountId) async {
     if (senderId is! Map) return null;
     switch (senderId['@type']) {
       case 'MessageSenderUser':
         final userId = senderId['userId'] as int?;
         if (userId == null) return null;
-        final user = await TDLibClient.getUser(userId: userId);
+        final user = await TDLibClient.getUser(
+          userId: userId,
+          accountId: accountId,
+        );
         if (user == null) return null;
         return [user['firstName'], user['lastName']]
             .whereType<String>()
@@ -179,7 +241,10 @@ class NotificationService {
       case 'MessageSenderChat':
         final senderChatId = senderId['chatId'] as int?;
         if (senderChatId == null) return null;
-        final senderChat = await TDLibClient.getChat(chatId: senderChatId);
+        final senderChat = await TDLibClient.getChat(
+          chatId: senderChatId,
+          accountId: accountId,
+        );
         return senderChat?['title'] as String?;
       default:
         return null;
@@ -187,39 +252,58 @@ class NotificationService {
   }
 
   Future<void> _show({
+    required int accountId,
     required int chatId,
     required String title,
     required String body,
+    String? accountName,
   }) async {
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       _channelId,
       _channelName,
       importance: Importance.high,
       priority: Priority.high,
+      // Names the account only when it is not the one on screen, and groups
+      // each account's notifications together in the shade.
+      subText: accountName,
+      groupKey: 'account_$accountId',
     );
 
-    // One notification per chat: a stable id derived from the chat id means a
-    // newer message replaces the previous one for that chat.
+    // One notification per chat per account: a stable id means a newer message
+    // replaces the previous one for that chat, and two accounts that share a
+    // chat id do not overwrite each other.
     await _plugin.show(
-      id: chatId.hashCode & 0x7fffffff,
+      id: _notificationId(accountId, chatId),
       title: title,
       body: body,
-      notificationDetails: const NotificationDetails(android: androidDetails),
-      payload: '$chatId',
+      notificationDetails: NotificationDetails(android: androidDetails),
+      payload: '$accountId:$chatId',
     );
-    _log.i('Notification shown for chat $chatId: $title — $body');
+    _log.i('Notification shown for chat $chatId of account $accountId');
   }
+
+  /// A stable, non-negative notification id for one chat of one account.
+  int _notificationId(int accountId, int chatId) =>
+      Object.hash(accountId, chatId) & 0x7fffffff;
 
   /// Clears the notification for [chatId], used once its messages are read.
-  Future<void> clear(int chatId) =>
-      _plugin.cancel(id: chatId.hashCode & 0x7fffffff);
+  Future<void> clear(int chatId, {int? accountId}) => _plugin.cancel(
+        id: _notificationId(accountId ?? TDLibClient.activeAccountId, chatId),
+      );
 
   void _onTap(NotificationResponse response) {
-    final chatId = int.tryParse(response.payload ?? '');
-    if (chatId != null) _openChat(chatId);
+    final payload = response.payload?.split(':');
+    if (payload == null || payload.length != 2) return;
+    final accountId = int.tryParse(payload.first);
+    final chatId = int.tryParse(payload.last);
+    if (accountId == null || chatId == null) return;
+    _openChat(accountId, chatId);
   }
 
-  Future<void> _openChat(int chatId) async {
+  Future<void> _openChat(int accountId, int chatId) async {
+    if (accountId != TDLibClient.activeAccountId) {
+      await AccountManager.instance.switchTo(accountId);
+    }
     final chat = ChatStore.instance.chat(chatId) ??
         await TDLibClient.getChat(chatId: chatId);
     if (chat == null) return;

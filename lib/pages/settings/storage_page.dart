@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Data and storage: how much space downloaded media takes, and clearing it.
 class StoragePage extends StatefulWidget {
@@ -40,15 +41,14 @@ class _StoragePageState extends State<StoragePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Clear cache?'),
-        content: const Text(
-          'Downloaded photos, videos and files will be removed from this '
-          'device. They stay on Telegram and download again when opened.',
+        title: Text(context.l10n.clearCacheQuestion),
+        content: Text(
+          context.l10n.clearCacheExplanation,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -56,7 +56,7 @@ class _StoragePageState extends State<StoragePage> {
               foregroundColor: scheme.onError,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Clear'),
+            child: Text(context.l10n.clear),
           ),
         ],
       ),
@@ -71,7 +71,7 @@ class _StoragePageState extends State<StoragePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Data and storage')),
+      appBar: AppBar(title: Text(context.l10n.dataAndStorage)),
       body: ValueListenableBuilder<bool>(
         valueListenable: _isBusy,
         builder: (context, isBusy, child) {
@@ -85,18 +85,18 @@ class _StoragePageState extends State<StoragePage> {
               children: [
                 _StatTile(
                   icon: Icons.perm_media_outlined,
-                  label: 'Downloaded media',
+                  label: context.l10n.downloadedMedia,
                   value: _formatBytes(stats?['filesSize']),
                   detail: '${stats?['fileCount'] ?? 0} files',
                 ),
                 _StatTile(
                   icon: Icons.dataset_outlined,
-                  label: 'Local database',
+                  label: context.l10n.localDatabase,
                   value: _formatBytes(stats?['databaseSize']),
                 ),
                 _StatTile(
                   icon: Icons.translate,
-                  label: 'Language packs',
+                  label: context.l10n.languagePacks,
                   value: _formatBytes(stats?['languagePackDatabaseSize']),
                 ),
                 const Divider(height: 24),
@@ -105,14 +105,13 @@ class _StoragePageState extends State<StoragePage> {
                   child: FilledButton.tonalIcon(
                     onPressed: _clearCache,
                     icon: const Icon(Icons.delete_sweep_outlined),
-                    label: const Text('Clear cache'),
+                    label: Text(context.l10n.clearCache),
                   ),
                 ),
-                const Padding(
+                Padding(
                   padding: EdgeInsets.all(16),
                   child: Text(
-                    'Your messages are not affected — only files cached on '
-                    'this device are removed.',
+                    context.l10n.clearCacheNote,
                   ),
                 ),
               ],

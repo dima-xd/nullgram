@@ -11,6 +11,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/call_colors.dart';
 import '../../theme/motion.dart';
 import '../chat/widgets/chat_avatar.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Full-screen call UI driven by [CallService]. Shows the caller avatar, a live
 /// duration once connected, and adaptive controls for ringing vs. active calls.
@@ -217,14 +218,14 @@ class _Controls extends StatelessWidget {
         children: [
           _CallAction(
             icon: Icons.call_end,
-            label: 'Decline',
+            label: context.l10n.decline,
             background: colors.decline,
             foreground: Colors.white,
             onTap: callService.hangUp,
           ),
           _CallAction(
             icon: Icons.call,
-            label: 'Accept',
+            label: context.l10n.accept,
             background: colors.accept,
             foreground: Colors.white,
             onTap: callService.accept,
@@ -239,14 +240,14 @@ class _Controls extends StatelessWidget {
       children: [
         _CallAction(
           icon: call.isMuted ? Icons.mic_off : Icons.mic,
-          label: 'Mute',
+          label: context.l10n.mute,
           background: call.isMuted ? colors.onCallSurface : neutralBg,
           foreground: call.isMuted ? colors.callSurface : colors.onCallSurface,
           onTap: callService.toggleMute,
         ),
         _CallAction(
           icon: speakerOn ? Icons.volume_up : Icons.volume_down,
-          label: 'Speaker',
+          label: context.l10n.speaker,
           background: speakerOn ? colors.onCallSurface : neutralBg,
           foreground: speakerOn ? colors.callSurface : colors.onCallSurface,
           onTap: onToggleSpeaker,
@@ -254,7 +255,7 @@ class _Controls extends StatelessWidget {
         if (call.isVideo)
           _CallAction(
             icon: call.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
-            label: 'Video',
+            label: context.l10n.video,
             background: call.isVideoEnabled ? colors.onCallSurface : neutralBg,
             foreground:
                 call.isVideoEnabled ? colors.callSurface : colors.onCallSurface,
@@ -262,7 +263,7 @@ class _Controls extends StatelessWidget {
           ),
         _CallAction(
           icon: Icons.call_end,
-          label: 'End',
+          label: context.l10n.endCall,
           background: colors.decline,
           foreground: Colors.white,
           onTap: callService.hangUp,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The devices signed in to this account, with the option to sign others out.
 class SessionsPage extends StatefulWidget {
@@ -48,14 +49,14 @@ class _SessionsPageState extends State<SessionsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Sign this device out?'),
+        title: Text(context.l10n.signOutDeviceQuestion),
         content: Text(
           '${session['deviceModel']} will lose access to your account.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -63,7 +64,7 @@ class _SessionsPageState extends State<SessionsPage> {
               foregroundColor: scheme.onError,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Sign out'),
+            child: Text(context.l10n.signOut),
           ),
         ],
       ),
@@ -81,7 +82,7 @@ class _SessionsPageState extends State<SessionsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Devices')),
+      appBar: AppBar(title: Text(context.l10n.devices)),
       body: ValueListenableBuilder<bool>(
         valueListenable: _isLoading,
         builder: (context, isLoading, child) {
@@ -114,10 +115,10 @@ class _SessionsPageState extends State<SessionsPage> {
                     ),
                     subtitle: Text(_details(session, isCurrent)),
                     trailing: isCurrent
-                        ? const Text('This device')
+                        ? Text(context.l10n.thisDevice)
                         : IconButton(
                             icon: const Icon(Icons.logout),
-                            tooltip: 'Sign out',
+                            tooltip: context.l10n.signOut,
                             onPressed: () => _terminate(session),
                           ),
                   );

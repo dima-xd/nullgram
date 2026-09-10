@@ -5,6 +5,7 @@ import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The account's contact list.
 ///
@@ -96,7 +97,7 @@ class _ContactsPageState extends State<ContactsPage> {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
             child: SearchBar(
               controller: _filterController,
-              hintText: 'Search contacts',
+              hintText: context.l10n.searchContacts,
               leading: const Icon(Icons.search),
               elevation: const WidgetStatePropertyAll(0),
             ),
@@ -127,11 +128,11 @@ class _ContactsPageState extends State<ContactsPage> {
             valueListenable: _contacts,
             builder: (context, contacts, child) {
               if (contacts.isEmpty) {
-                return const EmptyState(
+                return EmptyState(
                   icon: Icons.contacts_outlined,
-                  title: 'No contacts',
+                  title: context.l10n.noContacts,
                   subtitle:
-                      'Contacts you add on Telegram will show up here.',
+                      context.l10n.contactsEmpty,
                 );
               }
               return ValueListenableBuilder<String>(
@@ -145,9 +146,9 @@ class _ContactsPageState extends State<ContactsPage> {
                               .contains(filter))
                           .toList();
                   if (visible.isEmpty) {
-                    return const EmptyState(
+                    return EmptyState(
                       icon: Icons.search_off,
-                      title: 'No contacts found',
+                      title: context.l10n.noContactsFound,
                     );
                   }
                   return ValueListenableBuilder<Set<int>>(

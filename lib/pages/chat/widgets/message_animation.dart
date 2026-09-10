@@ -7,6 +7,7 @@ import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/theme/motion.dart';
 import 'package:video_player/video_player.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// An animation (GIF) message.
 ///
@@ -192,7 +193,7 @@ class _MessageAnimationState extends State<MessageAnimation> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                'GIF',
+                context.l10n.gif,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,

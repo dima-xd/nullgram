@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/widgets/video_player_page.dart';
+import 'package:nullgram/services/auto_download.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
@@ -53,6 +54,7 @@ class _MessageVideoState extends State<MessageVideo> {
     super.initState();
     _fileSubscription = TDLibClient.filesUpdates.listen(_onFileUpdate);
     _downloadThumbnail();
+    autoDownloadFile(_videoFile, AutoDownloadKind.video);
   }
 
   @override

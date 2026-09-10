@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/settings/two_step_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/pages/settings/passcode_page.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Privacy and security: the blocked-senders list.
 class PrivacyPage extends StatefulWidget {
@@ -69,16 +71,26 @@ class _PrivacyPageState extends State<PrivacyPage> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Privacy and security')),
+      appBar: AppBar(title: Text(context.l10n.privacyAndSecurity)),
       // A single scroll view rather than one list per section, so the
       // two-step row stays reachable even when nobody is blocked.
       body: ListView(
         padding: withBottomSafeArea(context),
         children: [
           ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: Text(context.l10n.passcodeLock),
+            subtitle: Text(context.l10n.passcodeSubtitle),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const PasscodePage()),
+            ),
+          ),
+          ListTile(
             leading: const Icon(Icons.password_outlined),
-            title: const Text('Two-step verification'),
-            subtitle: const Text('A password on top of the login code'),
+            title: Text(context.l10n.twoStepVerification),
+            subtitle: Text(context.l10n.twoStepSubtitle),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.push(
               context,
@@ -89,7 +101,7 @@ class _PrivacyPageState extends State<PrivacyPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
             child: Text(
-              'Blocked users',
+              context.l10n.blockedUsers,
               style: theme.textTheme.titleSmall
                   ?.copyWith(color: theme.colorScheme.primary),
             ),
@@ -107,11 +119,10 @@ class _PrivacyPageState extends State<PrivacyPage> {
                 valueListenable: _blocked,
                 builder: (context, blocked, child) {
                   if (blocked.isEmpty) {
-                    return const Padding(
+                    return Padding(
                       padding: EdgeInsets.fromLTRB(16, 8, 16, 24),
                       child: Text(
-                        'Nobody is blocked. Blocked users cannot message you '
-                        'or see when you are online.',
+                        context.l10n.nobodyBlocked,
                       ),
                     );
                   }
@@ -163,7 +174,7 @@ class _BlockedUserTile extends StatelessWidget {
           user['phoneNumber'] != null ? Text('+${user['phoneNumber']}') : null,
       trailing: TextButton(
         onPressed: onUnblock,
-        child: const Text('Unblock'),
+        child: Text(context.l10n.unblock),
       ),
     );
   }

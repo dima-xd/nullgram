@@ -7,6 +7,7 @@ import 'package:nullgram/services/chat_store.dart';
 import '../chat/chat_page.dart';
 import '../search/search_page.dart';
 import 'menu.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The chat list: one tab per chat folder, with the archive reachable from a
 /// row above the main list.
@@ -20,9 +21,14 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final ChatStore _store = ChatStore.instance;
 
-  /// One entry per tab. The first is the implicit "All chats" tab, which has no
-  /// folder id and therefore shows the whole main list.
-  List<({int? id, String title})> _tabs = const [(id: null, title: 'All')];
+  /// One entry per tab. The first is the implicit "All chats" tab, which has
+  /// no folder id and therefore shows the whole main list.
+  ///
+  /// Its title is null rather than a translated string: the tabs are rebuilt
+  /// from `initState`, where reading an inherited widget — which is what a
+  /// localization lookup is — is not allowed. The label is resolved in
+  /// `build` instead.
+  List<({int? id, String? title})> _tabs = [(id: null, title: null)];
 
   TabController? _tabController;
 
@@ -51,8 +57,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// only when the number of tabs actually changed (recreating it on every
   /// update would reset the selected tab).
   void _syncTabs() {
-    final tabs = <({int? id, String title})>[
-      (id: null, title: 'All'),
+    final tabs = <({int? id, String? title})>[
+      (id: null, title: null),
       for (final folder in _store.folders)
         (id: folder['id'] as int, title: folder['title'] as String),
     ];
@@ -86,7 +92,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         actions: [
           IconButton(
             icon: const Icon(Icons.search),
-            tooltip: 'Search',
+            tooltip: context.l10n.search,
             onPressed: _openSearch,
           ),
         ],
@@ -102,7 +108,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     indicatorSize: TabBarIndicatorSize.label,
                     tabs: [
                       for (final tab in _tabs)
-                        Tab(child: _FolderTab(folderId: tab.id, title: tab.title)),
+                        Tab(
+                          child: _FolderTab(
+                            folderId: tab.id,
+                            title: tab.title ?? context.l10n.all,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -112,7 +123,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       drawer: const HomeMenu(),
       floatingActionButton: FloatingActionButton(
         onPressed: _composeNewChat,
-        tooltip: 'New message',
+        tooltip: context.l10n.newMessage,
         child: const Icon(Icons.edit_outlined),
       ),
       body: hasFolders && controller != null
@@ -206,7 +217,7 @@ class _ArchiveRow extends StatelessWidget {
         backgroundColor: scheme.surfaceContainerHighest,
         child: Icon(Icons.archive_outlined, color: scheme.onSurfaceVariant),
       ),
-      title: const Text('Archived chats'),
+      title: Text(context.l10n.archivedChats),
       trailing: unreadCount > 0 ? Badge(label: Text('$unreadCount')) : null,
       onTap: onTap,
     );

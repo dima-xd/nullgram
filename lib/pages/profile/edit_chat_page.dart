@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Edits a group's or channel's name, description and photo.
 ///
@@ -97,7 +98,7 @@ class _EditChatPageState extends State<EditChatPage> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.check),
-              tooltip: 'Save',
+              tooltip: context.l10n.save,
               onPressed: isSaving ? null : _save,
             ),
           ),
@@ -135,7 +136,7 @@ class _EditChatPageState extends State<EditChatPage> {
                     bottom: 0,
                     child: IconButton.filled(
                       icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-                      tooltip: 'Change photo',
+                      tooltip: context.l10n.changePhoto,
                       onPressed: _pickPhoto,
                     ),
                   ),
@@ -158,8 +159,8 @@ class _EditChatPageState extends State<EditChatPage> {
             maxLines: 4,
             maxLength: 255,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Description',
+            decoration: InputDecoration(
+              labelText: context.l10n.description,
               border: OutlineInputBorder(),
               alignLabelWithHint: true,
             ),

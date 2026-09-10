@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/send_options.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Offers the alternatives to an immediate, notifying send.
 ///
@@ -18,8 +19,8 @@ Future<SendOptions?> showSendOptionsSheet({
         children: [
           ListTile(
             leading: const Icon(Icons.notifications_off_outlined),
-            title: const Text('Send without sound'),
-            subtitle: const Text('The recipient is not notified'),
+            title: Text(context.l10n.sendWithoutSound),
+            subtitle: Text(context.l10n.silentSendHint),
             onTap: () => Navigator.pop(sheetContext, 'silent'),
           ),
           // TDLib can only wait for a *user* to come online, so this is
@@ -27,14 +28,14 @@ Future<SendOptions?> showSendOptionsSheet({
           if (isPrivateChat)
             ListTile(
               leading: const Icon(Icons.schedule_send_outlined),
-              title: const Text('Send when online'),
-              subtitle: const Text('Delivered once they are back'),
+              title: Text(context.l10n.sendWhenOnline),
+              subtitle: Text(context.l10n.deliveredWhenBack),
               onTap: () => Navigator.pop(sheetContext, 'online'),
             ),
           ListTile(
             leading: const Icon(Icons.event_outlined),
-            title: const Text('Schedule message'),
-            subtitle: const Text('Pick a date and time'),
+            title: Text(context.l10n.scheduleMessage),
+            subtitle: Text(context.l10n.pickDateAndTime),
             onTap: () => Navigator.pop(sheetContext, 'schedule'),
           ),
         ],

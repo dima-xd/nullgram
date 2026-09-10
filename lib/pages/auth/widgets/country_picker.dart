@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// A country entry for the phone-number dial-code picker.
 class Country {
@@ -158,7 +159,7 @@ class _CountryPickerSheetState extends State<_CountryPickerSheet> {
               child: SearchBar(
                 controller: _searchController,
                 autoFocus: true,
-                hintText: 'Search country',
+                hintText: context.l10n.searchCountry,
                 leading: const Icon(Icons.search),
                 onChanged: (value) => setState(() => _query = value),
               ),
@@ -241,7 +242,7 @@ class _CountryEmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            'No countries found',
+            context.l10n.noCountriesFound,
             style: theme.textTheme.bodyLarge?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

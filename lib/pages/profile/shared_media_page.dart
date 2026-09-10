@@ -8,6 +8,7 @@ import 'package:nullgram/services/link_resolver.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// One tab of the shared-media browser.
 typedef _MediaTab = ({String label, String filter, bool isGrid});
@@ -22,39 +23,58 @@ class SharedMediaPage extends StatelessWidget {
 
   final Map<String, dynamic> chat;
 
-  static const List<_MediaTab> _tabs = [
+  /// The tabs, built per call because their labels are translated.
+  static List<_MediaTab> _tabsOf(BuildContext context) => [
     (
-      label: 'Media',
+      label: context.l10n.media,
       filter: 'searchMessagesFilterPhotoAndVideo',
       isGrid: true,
     ),
-    (label: 'Files', filter: 'searchMessagesFilterDocument', isGrid: false),
-    (label: 'Links', filter: 'searchMessagesFilterUrl', isGrid: false),
-    (label: 'Music', filter: 'searchMessagesFilterAudio', isGrid: false),
-    (label: 'Voice', filter: 'searchMessagesFilterVoiceNote', isGrid: false),
+    (
+      label: context.l10n.files,
+      filter: 'searchMessagesFilterDocument',
+      isGrid: false,
+    ),
+    (
+      label: context.l10n.links,
+      filter: 'searchMessagesFilterUrl',
+      isGrid: false,
+    ),
+    (
+      label: context.l10n.music,
+      filter: 'searchMessagesFilterAudio',
+      isGrid: false,
+    ),
+    (
+      label: context.l10n.voice,
+      filter: 'searchMessagesFilterVoiceNote',
+      isGrid: false,
+    ),
   ];
 
   @override
   Widget build(BuildContext context) {
+    final tabs = _tabsOf(context);
+
     return DefaultTabController(
-      length: _tabs.length,
+      length: tabs.length,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Shared media'),
+          title: Text(context.l10n.sharedMedia),
           bottom: TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,
-            tabs: [for (final tab in _tabs) Tab(text: tab.label)],
+            tabs: [for (final tab in tabs) Tab(text: tab.label)],
           ),
         ),
         body: TabBarView(
           children: [
-            for (final tab in _tabs)
+            for (final tab in tabs)
               _MediaList(
                 chat: chat,
                 filter: tab.filter,
                 isGrid: tab.isGrid,
-                emptyLabel: tab.label.toLowerCase(),
+                emptyTitle: context.l10n.nothingSharedYet,
               ),
           ],
         ),
@@ -69,13 +89,13 @@ class _MediaList extends StatefulWidget {
     required this.chat,
     required this.filter,
     required this.isGrid,
-    required this.emptyLabel,
+    required this.emptyTitle,
   });
 
   final Map<String, dynamic> chat;
   final String filter;
   final bool isGrid;
-  final String emptyLabel;
+  final String emptyTitle;
 
   @override
   State<_MediaList> createState() => _MediaListState();
@@ -168,8 +188,8 @@ class _MediaListState extends State<_MediaList> {
                 ? const Center(child: CircularProgressIndicator())
                 : EmptyState(
                     icon: Icons.perm_media_outlined,
-                    title: 'No ${widget.emptyLabel} yet',
-                    subtitle: 'Anything shared in this chat shows up here.',
+                    title: widget.emptyTitle,
+                    subtitle: context.l10n.sharedMediaEmpty,
                   ),
           );
         }
@@ -309,7 +329,7 @@ class _MediaRow extends StatelessWidget {
           ? null
           : IconButton(
               icon: const Icon(Icons.chat_outlined),
-              tooltip: 'Show in chat',
+              tooltip: context.l10n.showInChat,
               onPressed: onTap,
             ),
     );

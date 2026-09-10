@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'sticker_image.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The composer's emoji and sticker panel.
 ///
@@ -125,7 +126,7 @@ class _EmojiGrid extends StatelessWidget {
           child: FloatingActionButton.small(
             heroTag: null,
             onPressed: onBackspace,
-            tooltip: 'Backspace',
+            tooltip: context.l10n.backspace,
             child: const Icon(Icons.backspace_outlined),
           ),
         ),
@@ -208,7 +209,7 @@ class _StickerGridState extends State<_StickerGrid> {
               child: isLoading
                   ? const CircularProgressIndicator()
                   : Text(
-                      'No stickers yet',
+                      context.l10n.noStickersYet,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
             ),
@@ -297,7 +298,7 @@ class _GifGridState extends State<_GifGrid> {
               child: isLoading
                   ? const CircularProgressIndicator()
                   : Text(
-                      'No saved GIFs',
+                      context.l10n.noSavedGifs,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
             ),

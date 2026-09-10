@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The long-press action sheet for a chat row.
 ///
@@ -92,10 +93,10 @@ Future<void> showChatActionsSheet({
           const Divider(height: 1),
           _Action(
             icon: Icons.cleaning_services_outlined,
-            label: 'Clear history',
+            label: context.l10n.clearHistory,
             destructive: true,
             confirm: (
-              title: 'Clear history?',
+              title: context.l10n.clearHistoryQuestion,
               body: 'All messages in this chat will be removed for you.',
               action: 'Clear',
             ),
@@ -178,7 +179,7 @@ class _Action extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(

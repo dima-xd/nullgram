@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_view.dart';
 import 'package:nullgram/services/chat_store.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The archived chat list.
 ///
@@ -13,7 +14,7 @@ class ArchivePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Archived chats')),
+      appBar: AppBar(title: Text(context.l10n.archivedChats)),
       body: ChatListView(
         kind: ChatListKind.archive,
         onChatTap: (chatId) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/create_chat_page.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/pages/search/search_page.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The compose menu behind the chat list's floating action button.
 Future<void> showNewChatSheet(BuildContext context) {
@@ -14,22 +15,22 @@ Future<void> showNewChatSheet(BuildContext context) {
         children: [
           _Entry(
             icon: Icons.group_outlined,
-            label: 'New group',
+            label: context.l10n.newGroup,
             page: () => const CreateChatPage(kind: NewChatKind.group),
           ),
           _Entry(
             icon: Icons.campaign_outlined,
-            label: 'New channel',
+            label: context.l10n.newChannel,
             page: () => const CreateChatPage(kind: NewChatKind.channel),
           ),
           _Entry(
             icon: Icons.contacts_outlined,
-            label: 'Contacts',
+            label: context.l10n.contacts,
             page: () => const ContactsPage(),
           ),
           _Entry(
             icon: Icons.search,
-            label: 'Find people and groups',
+            label: context.l10n.findPeopleAndGroups,
             page: () => const SearchPage(),
           ),
         ],

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Fullscreen, Telegram-style photo viewer.
 ///
@@ -108,26 +109,28 @@ class _ImageDetailsState extends State<ImageDetails> {
   Future<void> _saveCurrent() async {
     final path = widget.photoPaths[_currentIndex];
     final messenger = ScaffoldMessenger.of(context);
+    // Read alongside the messenger: after the await this widget may be gone,
+    // and a lookup needs a mounted element.
+    final l10n = context.l10n;
     try {
       await Gal.putImage(path);
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Saved to gallery')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(l10n.savedToGallery)));
     } catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Failed to save: $e')),
+        SnackBar(content: Text(l10n.failedToSave('$e'))),
       );
     }
   }
 
   Future<void> _shareCurrent() async {
     final path = widget.photoPaths[_currentIndex];
+    final messenger = ScaffoldMessenger.of(context);
+    final l10n = context.l10n;
     try {
       await SharePlus.instance.share(ShareParams(files: [XFile(path)]));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share: $e')),
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.failedToShare('$e'))),
       );
     }
   }
@@ -404,19 +407,19 @@ class _TopChrome extends StatelessWidget {
                   icon: const Icon(Icons.more_vert, color: Colors.white),
                   onSelected: (value) =>
                       value == 0 ? onSave() : onShare(),
-                  itemBuilder: (context) => const [
+                  itemBuilder: (context) => [
                     PopupMenuItem(
                       value: 0,
                       child: ListTile(
                         leading: Icon(Icons.download),
-                        title: Text('Save'),
+                        title: Text(context.l10n.save),
                       ),
                     ),
                     PopupMenuItem(
                       value: 1,
                       child: ListTile(
                         leading: Icon(Icons.share),
-                        title: Text('Share'),
+                        title: Text(context.l10n.share),
                       ),
                     ),
                   ],

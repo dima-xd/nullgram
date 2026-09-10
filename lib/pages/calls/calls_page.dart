@@ -6,6 +6,7 @@ import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The call log.
 ///
@@ -46,7 +47,7 @@ class _CallsPageState extends State<CallsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Calls')),
+      appBar: AppBar(title: Text(context.l10n.calls)),
       body: ValueListenableBuilder<bool>(
         valueListenable: _isLoading,
         builder: (context, isLoading, child) {
@@ -57,10 +58,10 @@ class _CallsPageState extends State<CallsPage> {
             valueListenable: _calls,
             builder: (context, calls, child) {
               if (calls.isEmpty) {
-                return const EmptyState(
+                return EmptyState(
                   icon: Icons.phone_outlined,
-                  title: 'No calls yet',
-                  subtitle: 'Calls you make and receive will appear here.',
+                  title: context.l10n.noCallsYet,
+                  subtitle: context.l10n.callsEmpty,
                 );
               }
               return RefreshIndicator(
@@ -129,7 +130,7 @@ class _CallTile extends StatelessWidget {
           ? null
           : IconButton(
               icon: Icon(isVideo ? Icons.videocam_outlined : Icons.call),
-              tooltip: 'Call back',
+              tooltip: context.l10n.callBack,
               onPressed: () =>
                   callService.startCall(userId: userId, isVideo: isVideo),
             ),

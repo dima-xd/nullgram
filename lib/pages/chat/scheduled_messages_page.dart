@@ -4,6 +4,7 @@ import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The messages queued to be sent in a chat later.
 ///
@@ -75,7 +76,7 @@ class _ScheduledMessagesPageState extends State<ScheduledMessagesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scheduled messages')),
+      appBar: AppBar(title: Text(context.l10n.scheduledMessages)),
       body: ValueListenableBuilder<bool>(
         valueListenable: _isLoading,
         builder: (context, isLoading, child) {
@@ -86,11 +87,11 @@ class _ScheduledMessagesPageState extends State<ScheduledMessagesPage> {
             valueListenable: _messages,
             builder: (context, messages, child) {
               if (messages.isEmpty) {
-                return const EmptyState(
+                return EmptyState(
                   icon: Icons.schedule_send_outlined,
-                  title: 'Nothing scheduled',
+                  title: context.l10n.nothingScheduled,
                   subtitle:
-                      'Hold the send button in a chat to schedule a message.',
+                      context.l10n.scheduledEmptyHint,
                 );
               }
               return ListView.separated(
@@ -109,7 +110,7 @@ class _ScheduledMessagesPageState extends State<ScheduledMessagesPage> {
                     subtitle: Text(_whenLabel(message)),
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline),
-                      tooltip: 'Delete',
+                      tooltip: context.l10n.delete,
                       onPressed: () => _delete(message),
                     ),
                   );

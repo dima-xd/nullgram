@@ -6,6 +6,7 @@ import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The member list of a group or channel, with the moderation actions the
 /// current user is allowed to perform.
@@ -159,7 +160,7 @@ class _GroupMembersPageState extends State<GroupMembersPage> {
       context,
       MaterialPageRoute(
         builder: (context) =>
-            const ContactsPage(selectable: true, title: 'Add members'),
+            ContactsPage(selectable: true, title: context.l10n.addMembers),
       ),
     );
     if (picked == null || picked.isEmpty) return;
@@ -184,7 +185,7 @@ class _GroupMembersPageState extends State<GroupMembersPage> {
           children: [
             ListTile(
               leading: const Icon(Icons.message_outlined),
-              title: const Text('Send message'),
+              title: Text(context.l10n.sendMessage),
               onTap: () => Navigator.pop(sheetContext, 'message'),
             ),
             // The owner's status can't be changed by anyone, including an admin.
@@ -203,7 +204,7 @@ class _GroupMembersPageState extends State<GroupMembersPage> {
                   color: Theme.of(sheetContext).colorScheme.error,
                 ),
                 title: Text(
-                  'Remove from group',
+                  context.l10n.removeFromGroup,
                   style: TextStyle(
                     color: Theme.of(sheetContext).colorScheme.error,
                   ),
@@ -248,11 +249,11 @@ class _GroupMembersPageState extends State<GroupMembersPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Members')),
+      appBar: AppBar(title: Text(context.l10n.members)),
       floatingActionButton: _canManage
           ? FloatingActionButton(
               onPressed: _addMembers,
-              tooltip: 'Add members',
+              tooltip: context.l10n.addMembers,
               child: const Icon(Icons.person_add_outlined),
             )
           : null,
@@ -266,11 +267,11 @@ class _GroupMembersPageState extends State<GroupMembersPage> {
             valueListenable: _members,
             builder: (context, members, child) {
               if (members.isEmpty) {
-                return const EmptyState(
+                return EmptyState(
                   icon: Icons.group_outlined,
-                  title: 'No members to show',
+                  title: context.l10n.noMembersToShow,
                   subtitle:
-                      'This chat does not expose its member list to you.',
+                      context.l10n.memberListHidden,
                 );
               }
               return ListView.separated(

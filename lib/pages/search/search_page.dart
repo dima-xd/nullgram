@@ -10,6 +10,7 @@ import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:nullgram/widgets/lottie_state.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Global search across chats and messages.
 ///
@@ -138,7 +139,7 @@ class _SearchPageState extends State<SearchPage>
         title: SearchBar(
           controller: _controller,
           autoFocus: true,
-          hintText: 'Search chats and messages',
+          hintText: context.l10n.searchChatsAndMessages,
           textInputAction: TextInputAction.search,
           onChanged: _onChanged,
           elevation: const WidgetStatePropertyAll(0),
@@ -150,7 +151,7 @@ class _SearchPageState extends State<SearchPage>
                 if (query.isEmpty) return const SizedBox.shrink();
                 return IconButton(
                   icon: const Icon(Icons.close),
-                  tooltip: 'Clear',
+                  tooltip: context.l10n.clear,
                   onPressed: () {
                     _controller.clear();
                     _onChanged('');
@@ -176,7 +177,12 @@ class _SearchPageState extends State<SearchPage>
     return ValueListenableBuilder<List<Map<String, dynamic>>>(
       valueListenable: _chats,
       builder: (context, chats, child) {
-        if (chats.isEmpty) return _placeholder('chats');
+        if (chats.isEmpty) {
+          return _placeholder(
+            context.l10n.searchChats,
+            context.l10n.noChatsFound,
+          );
+        }
         return ListView.builder(
           padding: withBottomSafeArea(context),
           itemCount: chats.length,
@@ -194,7 +200,12 @@ class _SearchPageState extends State<SearchPage>
     return ValueListenableBuilder<List<Map<String, dynamic>>>(
       valueListenable: _messages,
       builder: (context, messages, child) {
-        if (messages.isEmpty) return _placeholder('messages');
+        if (messages.isEmpty) {
+          return _placeholder(
+            context.l10n.searchMessages,
+            context.l10n.noMessagesFound,
+          );
+        }
         return ListView.separated(
           padding: withBottomSafeArea(context),
           itemCount: messages.length,
@@ -228,7 +239,12 @@ class _SearchPageState extends State<SearchPage>
     );
   }
 
-  Widget _placeholder(String what) {
+  /// The empty state for one tab.
+  ///
+  /// Both titles are passed in whole rather than composed from a noun:
+  /// dropping a translated word into an English sentence pattern does
+  /// not survive translation.
+  Widget _placeholder(String searchTitle, String emptyTitle) {
     return ValueListenableBuilder<bool>(
       valueListenable: _isSearching,
       builder: (context, isSearching, child) {
@@ -247,14 +263,14 @@ class _SearchPageState extends State<SearchPage>
             if (query.isEmpty) {
               return EmptyState(
                 icon: Icons.search,
-                title: 'Search $what',
-                subtitle: 'Type to search across Telegram.',
+                title: searchTitle,
+                subtitle: context.l10n.searchGlobalHint,
               );
             }
             return EmptyState(
               icon: Icons.search_off,
-              title: 'No $what found',
-              subtitle: 'Try a different search term.',
+              title: emptyTitle,
+              subtitle: context.l10n.tryDifferentSearch,
             );
           },
         );

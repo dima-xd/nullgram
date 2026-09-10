@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/utils/sender_names.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The quoted block above a message that replies to another one.
 ///
@@ -199,7 +200,7 @@ class _ForwardHeaderState extends State<ForwardHeader> {
           const SizedBox(width: 4),
           Flexible(
             child: Text(
-              'Forwarded from $name',
+              context.l10n.forwardedFrom(name),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(

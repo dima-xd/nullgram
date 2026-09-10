@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:nullgram/services/auto_download.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
 import 'image_details.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 class MessagePhoto extends StatefulWidget {
   final Map<String, dynamic> content;
@@ -70,7 +72,11 @@ class _MessagePhotoState extends State<MessagePhoto> {
     if (file == null) return;
     if (file['local']?['isDownloadingCompleted'] == true) {
       _applyFile(file);
+      return;
     }
+    // Telegram shows photos without a tap; the rules are what keep that from
+    // happening on metered data.
+    autoDownloadFile(file, AutoDownloadKind.photo);
   }
 
   @override
@@ -128,7 +134,7 @@ class _MessagePhotoState extends State<MessagePhoto> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to download photo: $e')),
+          SnackBar(content: Text(context.l10n.failedToDownload('$e'))),
         );
       }
     } finally {

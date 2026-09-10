@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// A poll the user filled in and wants to send.
 typedef PollDraft = ({
@@ -86,15 +87,15 @@ class _PollComposerState extends State<_PollComposer> {
         shrinkWrap: true,
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
-          Text('New poll', style: Theme.of(context).textTheme.titleMedium),
+          Text(context.l10n.newPoll, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 16),
           TextField(
             controller: _question,
             autofocus: true,
             textCapitalization: TextCapitalization.sentences,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              labelText: 'Question',
+            decoration: InputDecoration(
+              labelText: context.l10n.question,
               border: OutlineInputBorder(),
             ),
           ),
@@ -110,7 +111,7 @@ class _PollComposerState extends State<_PollComposer> {
                       textCapitalization: TextCapitalization.sentences,
                       onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
-                        labelText: 'Answer ${index + 1}',
+                        labelText: context.l10n.pollAnswerLabel(index + 1),
                         border: const OutlineInputBorder(),
                         isDense: true,
                       ),
@@ -118,7 +119,7 @@ class _PollComposerState extends State<_PollComposer> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.remove_circle_outline),
-                    tooltip: 'Remove',
+                    tooltip: context.l10n.remove,
                     onPressed:
                         _options.length <= 2 ? null : () => _removeOption(index),
                   ),
@@ -131,18 +132,18 @@ class _PollComposerState extends State<_PollComposer> {
               child: TextButton.icon(
                 onPressed: _addOption,
                 icon: const Icon(Icons.add),
-                label: const Text('Add an answer'),
+                label: Text(context.l10n.addAnswer),
               ),
             ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Anonymous voting'),
+            title: Text(context.l10n.anonymousVoting),
             value: _isAnonymous,
             onChanged: (value) => setState(() => _isAnonymous = value),
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Multiple answers'),
+            title: Text(context.l10n.multipleAnswers),
             value: _allowMultipleAnswers,
             onChanged: (value) =>
                 setState(() => _allowMultipleAnswers = value),
@@ -150,7 +151,7 @@ class _PollComposerState extends State<_PollComposer> {
           const SizedBox(height: 8),
           FilledButton(
             onPressed: _isValid ? _submit : null,
-            child: const Text('Create poll'),
+            child: Text(context.l10n.createPoll),
           ),
         ],
       ),

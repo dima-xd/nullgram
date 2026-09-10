@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:nullgram/services/auto_download.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// An audio message bubble with inline playback.
 ///
@@ -58,6 +60,10 @@ class _MessageAudioState extends State<MessageAudio> {
       final bytes = TdBytes.decode(widget.content['voiceNote']?['waveform']);
       if (bytes != null) _waveform = _decodeWaveform(bytes);
     }
+
+    // Voice notes and music both land in TDLib's "other" bucket, whose modest
+    // default is comfortably above any voice note.
+    autoDownloadFile(_audioFile, AutoDownloadKind.other);
   }
 
   /// Unpacks TDLib's voice waveform: a byte stream of 5-bit samples (0-31),
@@ -163,7 +169,7 @@ class _MessageAudioState extends State<MessageAudio> {
       _isDownloading.value = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to download audio: $e')),
+          SnackBar(content: Text(context.l10n.failedToDownload('$e'))),
         );
       }
     }
@@ -203,7 +209,7 @@ class _MessageAudioState extends State<MessageAudio> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to play audio: $e')),
+          SnackBar(content: Text(context.l10n.failedToPlay('$e'))),
         );
       }
     }

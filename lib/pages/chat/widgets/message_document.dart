@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:nullgram/services/auto_download.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:share_plus/share_plus.dart';
@@ -37,6 +38,11 @@ class _MessageDocumentState extends State<MessageDocument> {
         setState(() {});
       }
     });
+
+    autoDownloadFile(
+      _document['document'] as Map<String, dynamic>?,
+      AutoDownloadKind.other,
+    );
   }
 
   @override

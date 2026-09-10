@@ -4,6 +4,7 @@ import 'package:nullgram/pages/profile/widgets/profile_header_sliver.dart';
 import 'package:nullgram/pages/profile/widgets/profile_info_tile.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The current user's own profile: avatar, name, username, phone and bio.
 ///
@@ -85,7 +86,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 actions: [
                   IconButton(
                     icon: const Icon(Icons.add_a_photo_outlined),
-                    tooltip: 'Change photo',
+                    tooltip: context.l10n.changePhoto,
                     onPressed: _changePhoto,
                   ),
                 ],
@@ -99,7 +100,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                         children: [
                           ProfileInfoTile(
                             icon: Icons.person_outline,
-                            label: 'Name',
+                            label: context.l10n.name,
                             value: _fullName(me),
                             editable: true,
                             onTap: () => _editName(me),
@@ -111,7 +112,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                                   info?['bio']?['text'] as String? ?? '';
                               return ProfileInfoTile(
                                 icon: Icons.info_outline,
-                                label: 'Bio',
+                                label: context.l10n.bio,
                                 value: bio.isNotEmpty ? bio : 'Not set',
                                 editable: true,
                                 onTap: () => _editBio(bio),
@@ -129,7 +130,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                         children: [
                           ProfileInfoTile(
                             icon: Icons.alternate_email,
-                            label: 'Username',
+                            label: context.l10n.username,
                             value: username != null ? '@$username' : 'Not set',
                             editable: true,
                             onTap: () => _editUsername(username),
@@ -137,7 +138,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                           if (phoneValue != null)
                             ProfileInfoTile(
                               icon: Icons.phone_outlined,
-                              label: 'Phone',
+                              label: context.l10n.phone,
                               value: phoneValue,
                               copyable: true,
                             ),
@@ -187,8 +188,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
       context: context,
       isScrollControlled: true,
       builder: (context) => _SingleFieldEditSheet(
-        title: 'Edit username',
-        label: 'Username',
+        title: context.l10n.editUsername,
+        label: context.l10n.username,
         icon: Icons.alternate_email,
         initialValue: _stripAt(current ?? ''),
       ),
@@ -202,8 +203,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
       context: context,
       isScrollControlled: true,
       builder: (context) => _SingleFieldEditSheet(
-        title: 'Edit bio',
-        label: 'Bio',
+        title: context.l10n.editBio,
+        label: context.l10n.bio,
         icon: Icons.info_outline,
         initialValue: current,
         maxLines: 3,
@@ -281,7 +282,7 @@ class _NameEditSheetState extends State<_NameEditSheet> {
   @override
   Widget build(BuildContext context) {
     return _EditSheetScaffold(
-      title: 'Edit name',
+      title: context.l10n.editName,
       children: [
         TextField(
           controller: _first,
@@ -289,8 +290,8 @@ class _NameEditSheetState extends State<_NameEditSheet> {
           textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.next,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
-            labelText: 'First name',
+          decoration: InputDecoration(
+            labelText: context.l10n.firstName,
             prefixIcon: Icon(Icons.person_outline),
           ),
         ),
@@ -300,8 +301,8 @@ class _NameEditSheetState extends State<_NameEditSheet> {
           textCapitalization: TextCapitalization.words,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _submit(),
-          decoration: const InputDecoration(
-            labelText: 'Last name',
+          decoration: InputDecoration(
+            labelText: context.l10n.lastName,
             prefixIcon: Icon(Icons.person_outline),
           ),
         ),
@@ -426,7 +427,7 @@ class _SaveButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return FilledButton(
       onPressed: enabled ? onPressed : null,
-      child: const Text('Save'),
+      child: Text(context.l10n.save),
     );
   }
 }

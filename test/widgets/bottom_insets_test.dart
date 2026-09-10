@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nullgram/l10n/l10n.dart';
 import 'package:nullgram/pages/chat/widgets/chat_composer.dart';
 import 'package:nullgram/pages/chat/widgets/emoji_panel.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
@@ -25,8 +26,14 @@ void useEdgeToEdgeScreen(WidgetTester tester) {
 }
 
 /// A screen whose bottom edge is where the composer sits.
+///
+/// The localization delegates are not optional: the composer reads its
+/// labels through `AppLocalizations`, which is absent from a bare
+/// `MaterialApp`.
 Widget edgeToEdgeApp(Widget child) {
   return MaterialApp(
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
     home: Scaffold(
       body: Column(
         children: [const Expanded(child: SizedBox()), child],

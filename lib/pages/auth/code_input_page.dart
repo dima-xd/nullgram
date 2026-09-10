@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 
 import 'widgets/auth_widgets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Screen for entering the login code sent to the user's phone.
 class CodeInputPage extends StatefulWidget {
@@ -109,13 +110,13 @@ class _CodeInputPageState extends State<CodeInputPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           AuthHeader(
-            title: 'Enter the code',
+            title: context.l10n.enterTheCode,
             subtitle: subtitle,
             icon: Icons.sms_outlined,
           ),
           TextButton(
             onPressed: () => Navigator.maybePop(context),
-            child: const Text('Wrong number?'),
+            child: Text(context.l10n.wrongNumber),
           ),
           const SizedBox(height: 16),
           _buildCodeField(theme),
@@ -126,7 +127,7 @@ class _CodeInputPageState extends State<CodeInputPage> {
               final complete =
                   _codeController.text.trim().length == _codeLength;
               return AuthPrimaryButton(
-                label: 'Verify',
+                label: context.l10n.verify,
                 loading: _isLoading.value,
                 onPressed: complete ? _verifyCode : null,
               );
@@ -161,7 +162,7 @@ class _CodeInputPageState extends State<CodeInputPage> {
         valueListenable: _secondsLeft,
         builder: (context, seconds, _) => seconds > 0
             ? Text(
-                'Resend code in ${seconds}s',
+                context.l10n.resendCodeIn(seconds),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -169,7 +170,7 @@ class _CodeInputPageState extends State<CodeInputPage> {
               )
             : TextButton(
                 onPressed: _resendCode,
-                child: const Text('Resend code'),
+                child: Text(context.l10n.resendCode),
               ),
       );
 }

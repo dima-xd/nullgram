@@ -3,16 +3,32 @@ import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// What [CreateChatPage] is creating.
 enum NewChatKind {
   group,
   channel;
 
-  String get title => this == NewChatKind.group ? 'New group' : 'New channel';
+  /// The page title for this kind.
+  String title(BuildContext context) => this == NewChatKind.group
+      ? context.l10n.newGroup
+      : context.l10n.newChannel;
 
-  String get nameHint =>
-      this == NewChatKind.group ? 'Group name' : 'Channel name';
+  /// The label of the name field.
+  String nameHint(BuildContext context) => this == NewChatKind.group
+      ? context.l10n.groupName
+      : context.l10n.channelName;
+
+  /// The label of the confirm button.
+  String action(BuildContext context) => this == NewChatKind.group
+      ? context.l10n.createGroup
+      : context.l10n.createChannel;
+
+  /// What to say when creation failed.
+  String failure(BuildContext context) => this == NewChatKind.group
+      ? context.l10n.groupCreateFailed
+      : context.l10n.channelCreateFailed;
 }
 
 /// Creates a group or a channel.
@@ -49,9 +65,9 @@ class _CreateChatPageState extends State<CreateChatPage> {
     final picked = await Navigator.push<List<int>>(
       context,
       MaterialPageRoute(
-        builder: (context) => const ContactsPage(
+        builder: (context) => ContactsPage(
           selectable: true,
-          title: 'Add members',
+          title: context.l10n.addMembers,
         ),
       ),
     );
@@ -87,7 +103,7 @@ class _CreateChatPageState extends State<CreateChatPage> {
     _isCreating.value = false;
 
     if (chat == null || chat['id'] == null) {
-      _error.value = 'Could not create the ${widget.kind.name}. Try again.';
+      _error.value = widget.kind.failure(context);
       return;
     }
 
@@ -104,7 +120,7 @@ class _CreateChatPageState extends State<CreateChatPage> {
     final isGroup = widget.kind == NewChatKind.group;
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.kind.title)),
+      appBar: AppBar(title: Text(widget.kind.title(context))),
       body: ListView(
         padding: withBottomSafeArea(context, const EdgeInsets.all(16)),
         children: [
@@ -113,7 +129,7 @@ class _CreateChatPageState extends State<CreateChatPage> {
             autofocus: true,
             textCapitalization: TextCapitalization.sentences,
             decoration: InputDecoration(
-              labelText: widget.kind.nameHint,
+              labelText: widget.kind.nameHint(context),
               border: const OutlineInputBorder(),
             ),
           ),
@@ -123,8 +139,8 @@ class _CreateChatPageState extends State<CreateChatPage> {
               controller: _descriptionController,
               maxLines: 3,
               textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Description (optional)',
+              decoration: InputDecoration(
+                labelText: context.l10n.descriptionOptional,
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),
@@ -137,7 +153,7 @@ class _CreateChatPageState extends State<CreateChatPage> {
               builder: (context, members, child) => Card(
                 child: ListTile(
                   leading: const Icon(Icons.person_add_outlined),
-                  title: const Text('Members'),
+                  title: Text(context.l10n.members),
                   subtitle: Text(
                     members.isEmpty
                         ? 'Nobody added yet'
@@ -173,7 +189,7 @@ class _CreateChatPageState extends State<CreateChatPage> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Text('Create ${widget.kind.name}'),
+                  : Text(widget.kind.action(context)),
             ),
           ),
         ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// A single row of profile information: a leading [icon], a small [label] and
 /// a larger [value].
@@ -40,7 +41,7 @@ class ProfileInfoTile extends StatelessWidget {
     await Clipboard.setData(ClipboardData(text: value));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Copied')),
+      SnackBar(content: Text(context.l10n.copied)),
     );
   }
 

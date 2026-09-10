@@ -3,6 +3,7 @@ import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Opens a link the way Telegram does: `t.me` links, usernames and invite
 /// links stay inside the app; anything else is handed to the system.
@@ -67,12 +68,11 @@ String? _telegramPath(String target) {
 Future<bool> _openPublicChat(BuildContext context, String username) async {
   final navigator = Navigator.of(context);
   final messenger = ScaffoldMessenger.of(context);
+  final notFound = context.l10n.usernameNotFound(username);
 
   final chat = await TDLibClient.searchPublicChat(username: username);
   if (chat == null || chat['id'] == null) {
-    messenger.showSnackBar(
-      SnackBar(content: Text('No Telegram account found for @$username')),
-    );
+    messenger.showSnackBar(SnackBar(content: Text(notFound)));
     return false;
   }
 
@@ -89,12 +89,12 @@ Future<bool> _openPublicChat(BuildContext context, String username) async {
 Future<void> _joinByInviteLink(BuildContext context, String link) async {
   final navigator = Navigator.of(context);
   final messenger = ScaffoldMessenger.of(context);
+  // Read up front, next to the messenger: every use below is past an await.
+  final l10n = context.l10n;
 
   final info = await TDLibClient.checkChatInviteLink(link: link);
   if (info == null) {
-    messenger.showSnackBar(
-      const SnackBar(content: Text('This invite link is no longer valid')),
-    );
+    messenger.showSnackBar(SnackBar(content: Text(l10n.inviteLinkInvalid)));
     return;
   }
 
@@ -116,16 +116,16 @@ Future<void> _joinByInviteLink(BuildContext context, String link) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: Text('Join $title?'),
+      title: Text(context.l10n.joinChatQuestion(title)),
       content: Text('${info['memberCount'] ?? 0} members'),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.cancel),
         ),
         FilledButton(
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: const Text('Join'),
+          child: Text(context.l10n.join),
         ),
       ],
     ),
@@ -134,9 +134,7 @@ Future<void> _joinByInviteLink(BuildContext context, String link) async {
 
   final joined = await TDLibClient.joinChatByInviteLink(link: link);
   if (joined == null) {
-    messenger.showSnackBar(
-      const SnackBar(content: Text('Could not join the chat')),
-    );
+    messenger.showSnackBar(SnackBar(content: Text(l10n.joinFailed)));
     return;
   }
   navigator.push(

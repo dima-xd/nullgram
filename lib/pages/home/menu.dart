@@ -5,9 +5,11 @@ import 'package:nullgram/pages/chat/create_chat_page.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/pages/home/archive_page.dart';
+import 'package:nullgram/pages/home/widgets/account_switcher.dart';
 import 'package:nullgram/pages/profile/my_profile_page.dart';
 import 'package:nullgram/pages/settings/settings_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The chat list's navigation drawer.
 class HomeMenu extends StatefulWidget {
@@ -19,6 +21,10 @@ class HomeMenu extends StatefulWidget {
 
 class _HomeMenuState extends State<HomeMenu> {
   final ValueNotifier<Map<String, dynamic>?> _me = ValueNotifier(null);
+
+  /// Whether the header shows the other accounts. Collapsed by default so the
+  /// drawer opens on navigation, not on account management.
+  bool _showAccounts = false;
 
   @override
   void initState() {
@@ -83,19 +89,35 @@ class _HomeMenuState extends State<HomeMenu> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (me == null)
-                          CircleAvatar(
-                            radius: 32,
-                            backgroundColor:
-                                theme.colorScheme.surfaceContainerHighest,
-                            child: Icon(
-                              Icons.person,
-                              size: 32,
-                              color: theme.colorScheme.onSurfaceVariant,
+                        Row(
+                          children: [
+                            if (me == null)
+                              CircleAvatar(
+                                radius: 32,
+                                backgroundColor:
+                                    theme.colorScheme.surfaceContainerHighest,
+                                child: Icon(
+                                  Icons.person,
+                                  size: 32,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              )
+                            else
+                              ChatAvatar(chat: _avatarChat(me), radius: 32),
+                            const Spacer(),
+                            IconButton(
+                              tooltip: context.l10n.switchAccounts,
+                              icon: Icon(
+                                _showAccounts
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                              ),
+                              onPressed: () => setState(
+                                () => _showAccounts = !_showAccounts,
+                              ),
                             ),
-                          )
-                        else
-                          ChatAvatar(chat: _avatarChat(me), radius: 32),
+                          ],
+                        ),
                         const SizedBox(height: 12),
                         Text(
                           me == null ? 'Nullgram' : _fullName(me),
@@ -114,49 +136,50 @@ class _HomeMenuState extends State<HomeMenu> {
                 );
               },
             ),
+            if (_showAccounts) const AccountSwitcherList(),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.person_outline),
-              title: const Text('My Profile'),
+              title: Text(context.l10n.myProfile),
               onTap: () => _open(() => const MyProfilePage()),
             ),
             ListTile(
               leading: const Icon(Icons.bookmark_outline),
-              title: const Text('Saved Messages'),
+              title: Text(context.l10n.savedMessages),
               onTap: _openSavedMessages,
             ),
             ListTile(
               leading: const Icon(Icons.archive_outlined),
-              title: const Text('Archived Chats'),
+              title: Text(context.l10n.archivedChatsTitle),
               onTap: () => _open(() => const ArchivePage()),
             ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.group_outlined),
-              title: const Text('New Group'),
+              title: Text(context.l10n.newGroupTitle),
               onTap: () =>
                   _open(() => const CreateChatPage(kind: NewChatKind.group)),
             ),
             ListTile(
               leading: const Icon(Icons.campaign_outlined),
-              title: const Text('New Channel'),
+              title: Text(context.l10n.newChannelTitle),
               onTap: () =>
                   _open(() => const CreateChatPage(kind: NewChatKind.channel)),
             ),
             ListTile(
               leading: const Icon(Icons.contacts_outlined),
-              title: const Text('Contacts'),
+              title: Text(context.l10n.contacts),
               onTap: () => _open(() => const ContactsPage()),
             ),
             ListTile(
               leading: const Icon(Icons.phone_outlined),
-              title: const Text('Calls'),
+              title: Text(context.l10n.calls),
               onTap: () => _open(() => const CallsPage()),
             ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.settings_outlined),
-              title: const Text('Settings'),
+              title: Text(context.l10n.settings),
               onTap: () => _open(() => const SettingsPage()),
             ),
           ],

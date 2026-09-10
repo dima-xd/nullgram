@@ -4,6 +4,7 @@ import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/services/link_resolver.dart';
 import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// A bot message's inline keyboard, rendered under its bubble.
 ///
@@ -129,6 +130,7 @@ class _KeyboardButton extends StatelessWidget {
     Map<String, dynamic>? type,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = context.l10n;
 
     switch (type?['@type']) {
       case 'InlineKeyboardButtonTypeUrl':
@@ -142,7 +144,7 @@ class _KeyboardButton extends StatelessWidget {
         if (text == null) return;
         await Clipboard.setData(ClipboardData(text: text));
         messenger.showSnackBar(
-          const SnackBar(content: Text('Copied to clipboard')),
+          SnackBar(content: Text(l10n.copiedToClipboard)),
         );
 
       case 'InlineKeyboardButtonTypeUser':
@@ -160,7 +162,7 @@ class _KeyboardButton extends StatelessWidget {
 
       default:
         messenger.showSnackBar(
-          const SnackBar(content: Text('This button is not supported yet')),
+          SnackBar(content: Text(context.l10n.buttonNotSupported)),
         );
     }
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../tdlib/tdlib_client.dart';
 import 'widgets/auth_widgets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Two-factor authentication password screen.
 class PasswordInputPage extends StatefulWidget {
@@ -53,7 +54,7 @@ class _PasswordInputPageState extends State<PasswordInputPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           AuthHeader(
-            title: 'Enter your password',
+            title: context.l10n.enterYourPassword,
             subtitle: subtitle,
             icon: Icons.lock_outline,
           ),
@@ -65,7 +66,7 @@ class _PasswordInputPageState extends State<PasswordInputPage> {
               obscureText: obscure,
               autofocus: true,
               decoration: InputDecoration(
-                hintText: 'Password',
+                hintText: context.l10n.password,
                 prefixIcon: const Icon(Icons.lock_outline),
                 suffixIcon: IconButton(
                   icon: Icon(
@@ -83,7 +84,7 @@ class _PasswordInputPageState extends State<PasswordInputPage> {
             builder: (context, _) {
               final hasPassword = _passwordController.text.isNotEmpty;
               return AuthPrimaryButton(
-                label: 'Submit',
+                label: context.l10n.submit,
                 loading: _isSubmitting.value,
                 onPressed: hasPassword ? _submitPassword : null,
               );

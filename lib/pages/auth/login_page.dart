@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:nullgram/services/account_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import 'widgets/auth_widgets.dart';
 import 'widgets/country_picker.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Which sign-in method the [LoginPage] is currently showing.
 enum AuthMode { phone, qr }
@@ -69,22 +71,39 @@ class _LoginPageState extends State<LoginPage> {
     if (digits.isEmpty) return;
 
     _isLoading.value = true;
+    final String? error;
     try {
-      await TDLibClient.setAuthenticationPhoneNumber(
+      error = await TDLibClient.setAuthenticationPhoneNumber(
         phoneNumber: '${_country.value.dialCode}$digits',
       );
-    } catch (_) {
-      if (!mounted) return;
-      showAuthError(context, 'Could not send the code. Please try again.');
     } finally {
       _isLoading.value = false;
     }
+    if (error != null && mounted) showAuthError(context, _reason(error));
   }
 
-  void _switchToQr() {
+  /// Turns a TDLib error code into something a person can act on.
+  ///
+  /// The codes that matter here are not obvious, and neither is retryable:
+  /// `VERIFICATION_FAILED` means Telegram demanded a Play Integrity or
+  /// reCAPTCHA token, which it only asks of official application credentials
+  /// and only accepts from the official app, while `API_ID_PUBLISHED_FLOOD`
+  /// means it recognized the credentials as publicly known. Both are answered
+  /// by an `api_id` of your own.
+  String _reason(String error) => switch (error) {
+        'PHONE_NUMBER_INVALID' => context.l10n.phoneNumberInvalid,
+        'VERIFICATION_FAILED' => context.l10n.appVerificationFailed,
+        'API_ID_PUBLISHED_FLOOD' => context.l10n.apiIdPublishedFlood,
+        _ => context.l10n.signInFailed(error),
+      };
+
+  Future<void> _switchToQr() async {
     _qrLink.value = null;
     _mode.value = AuthMode.qr;
-    TDLibClient.requestQrCodeAuthentication();
+    final error = await TDLibClient.requestQrCodeAuthentication();
+    // Without this the QR view would spin forever: the link only ever arrives
+    // as an authorization state, and a refused request produces none.
+    if (error != null && mounted) showAuthError(context, _reason(error));
   }
 
   void _switchToPhone() => _mode.value = AuthMode.phone;
@@ -95,6 +114,25 @@ class _LoginPageState extends State<LoginPage> {
     if (selected != null) _country.value = selected;
   }
 
+  /// The bar above the login form, present only when there is somewhere to go
+  /// back to: the phone form of a newly added account can be abandoned, and
+  /// the QR form falls back to the phone form.
+  PreferredSizeWidget? _appBar(AuthMode mode) {
+    final leading = switch (mode) {
+      AuthMode.qr => BackButton(onPressed: _switchToPhone),
+      AuthMode.phone when AccountManager.instance.canCancelPendingAccount =>
+        CloseButton(onPressed: AccountManager.instance.cancelPendingAccount),
+      AuthMode.phone => null,
+    };
+    if (leading == null) return null;
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      leading: leading,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -102,14 +140,7 @@ class _LoginPageState extends State<LoginPage> {
     return ValueListenableBuilder<AuthMode>(
       valueListenable: _mode,
       builder: (context, mode, _) => Scaffold(
-        appBar: mode == AuthMode.qr
-            ? AppBar(
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                scrolledUnderElevation: 0,
-                leading: BackButton(onPressed: _switchToPhone),
-              )
-            : null,
+        appBar: _appBar(mode),
         body: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -136,9 +167,9 @@ class _LoginPageState extends State<LoginPage> {
         key: const ValueKey('phone'),
         mainAxisSize: MainAxisSize.min,
         children: [
-          const AuthHeader(
-            title: 'Welcome to Nullgram',
-            subtitle: 'Enter your phone number to continue',
+          AuthHeader(
+            title: context.l10n.welcomeToNullgram,
+            subtitle: context.l10n.enterPhoneToContinue,
           ),
           const SizedBox(height: 32),
           _buildPhoneInput(theme),
@@ -149,7 +180,7 @@ class _LoginPageState extends State<LoginPage> {
               final hasDigits =
                   _phoneController.text.replaceAll(RegExp(r'\D'), '').isNotEmpty;
               return AuthPrimaryButton(
-                label: 'Continue',
+                label: context.l10n.continueLabel,
                 icon: Icons.arrow_forward,
                 loading: _isLoading.value,
                 onPressed: hasDigits ? _sendCode : null,
@@ -160,7 +191,7 @@ class _LoginPageState extends State<LoginPage> {
           TextButton.icon(
             onPressed: _switchToQr,
             icon: const Icon(Icons.qr_code_rounded),
-            label: const Text('Log in by QR Code'),
+            label: Text(context.l10n.loginByQrCode),
           ),
         ],
       );
@@ -201,7 +232,7 @@ class _LoginPageState extends State<LoginPage> {
                 keyboardType: TextInputType.phone,
                 autofocus: true,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: authInputDecoration(hintText: 'Phone number'),
+                decoration: authInputDecoration(hintText: context.l10n.phoneNumber),
                 onSubmitted: (_) => _sendCode(),
               ),
             ),
@@ -213,10 +244,9 @@ class _LoginPageState extends State<LoginPage> {
         key: const ValueKey('qr'),
         mainAxisSize: MainAxisSize.min,
         children: [
-          const AuthHeader(
-            title: 'Log in by QR Code',
-            subtitle: 'Open Telegram on your phone, go to '
-                'Settings › Devices › Link Desktop Device, and scan this code.',
+          AuthHeader(
+            title: context.l10n.loginByQrCode,
+            subtitle: context.l10n.qrInstructions,
             icon: Icons.qr_code_rounded,
           ),
           const SizedBox(height: 32),
@@ -233,7 +263,7 @@ class _LoginPageState extends State<LoginPage> {
           TextButton.icon(
             onPressed: _switchToPhone,
             icon: const Icon(Icons.phone_rounded),
-            label: const Text('Log in by phone number'),
+            label: Text(context.l10n.loginByPhone),
           ),
         ],
       );
@@ -243,7 +273,7 @@ class _QrPlaceholder extends StatelessWidget {
   const _QrPlaceholder();
 
   @override
-  Widget build(BuildContext context) => const Column(
+  Widget build(BuildContext context) => Column(
         key: ValueKey('qr-loading'),
         children: [
           SizedBox(
@@ -252,7 +282,7 @@ class _QrPlaceholder extends StatelessWidget {
             child: CircularProgressIndicator(strokeWidth: 3),
           ),
           SizedBox(height: 16),
-          Text('Generating QR code...'),
+          Text(context.l10n.generatingQrCode),
         ],
       );
 }

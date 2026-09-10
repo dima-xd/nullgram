@@ -5,7 +5,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';
 import 'package:nullgram/pages/chat/utils/albums_grouper.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/scheduled_messages_page.dart';
@@ -19,6 +18,9 @@ import 'package:nullgram/pages/chat/widgets/emoji_status.dart';
 import 'package:nullgram/pages/chat/widgets/forward_chat_picker.dart';
 import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/message_context_menu.dart';
+import 'package:nullgram/pages/chat/widgets/auto_delete_sheet.dart';
+import 'package:nullgram/pages/chat/widgets/message_info_sheet.dart';
+import 'package:nullgram/pages/chat/widgets/message_translation_sheet.dart';
 import 'package:nullgram/pages/chat/widgets/poll_composer.dart';
 import 'package:nullgram/pages/chat/widgets/send_options_sheet.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
@@ -32,6 +34,8 @@ import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/services/call_service.dart';
 import 'package:nullgram/widgets/empty_state.dart';
 import 'package:video_player/video_player.dart';
+import 'package:nullgram/l10n/l10n.dart';
+import 'package:nullgram/pages/chat/utils/member_count.dart';
 
 /// A single conversation: its history, composer and per-chat actions.
 class ChatPage extends StatefulWidget {
@@ -86,6 +90,12 @@ class _ChatPageState extends State<ChatPage> {
   /// updates. The TDLib chat object has no embedded user, so it is fetched via
   /// [TDLibClient.getUser] rather than read from `chat['user']`.
   final ValueNotifier<Map<String, dynamic>?> _chatUser = ValueNotifier(null);
+
+  /// The `botCommand` objects offered in this chat, empty when no bot is
+  /// involved. Drives the composer's slash button.
+  final ValueNotifier<List<Map<String, dynamic>>> _botCommands = ValueNotifier(
+    const [],
+  );
 
   /// Whether the peer of a private chat is blocked, for the overflow menu.
   bool _isPeerBlocked = false;
@@ -149,6 +159,7 @@ class _ChatPageState extends State<ChatPage> {
     _loadLocalMessages();
     _loadPinnedMessages();
     _resolveChatUser();
+    _loadBotCommands();
 
     // Tell TDLib the chat is open so read receipts and channel updates flow.
     TDLibClient.openChat(chatId: _chatId);
@@ -196,6 +207,7 @@ class _ChatPageState extends State<ChatPage> {
     _searchDebounce?.cancel();
     _pinnedMessages.dispose();
     _chatUser.dispose();
+    _botCommands.dispose();
     _chat.dispose();
     super.dispose();
   }
@@ -385,6 +397,47 @@ class _ChatPageState extends State<ChatPage> {
     isUserBlocked(userId).then((blocked) {
       if (mounted) _isPeerBlocked = blocked;
     }).catchError((_) {});
+  }
+
+  /// Loads the commands the chat's bots advertise.
+  ///
+  /// A private chat carries them on the peer's `botInfo`; a group collects one
+  /// `botCommands` entry per bot member, which are flattened into one list
+  /// because the composer offers them as a single menu.
+  Future<void> _loadBotCommands() async {
+    final userId = _chatUserId();
+    if (userId != null) {
+      final botInfo = await TDLibClient.getBotInfo(userId);
+      if (!mounted) return;
+      _botCommands.value = _commandsFrom(botInfo?['commands']);
+      return;
+    }
+
+    final type = widget.chat['type'] as Map<String, dynamic>?;
+    final fullInfo = switch (type?['@type']) {
+      'ChatTypeBasicGroup' => await TDLibClient.getBasicGroupFullInfo(
+        basicGroupId: type!['basicGroupId'] as int,
+      ),
+      'ChatTypeSupergroup' => await TDLibClient.getSupergroupFullInfo(
+        supergroupId: type!['supergroupId'] as int,
+      ),
+      _ => null,
+    };
+    if (!mounted || fullInfo == null) return;
+
+    _botCommands.value = [
+      for (final bot in fullInfo['botCommands'] as List? ?? const [])
+        ..._commandsFrom((bot as Map)['commands']),
+    ];
+  }
+
+  /// Copies a TDLib `botCommand` list into plain maps.
+  static List<Map<String, dynamic>> _commandsFrom(dynamic commands) {
+    if (commands is! List) return const [];
+    return [
+      for (final command in commands)
+        if (command != null) Map<String, dynamic>.from(command as Map),
+    ];
   }
 
   // ---------------------------------------------------------------------------
@@ -611,6 +664,8 @@ class _ChatPageState extends State<ChatPage> {
       isPinned: message['isPinned'] == true,
       // Only a chat with a public username can produce a t.me link.
       canCopyLink: _chat.value['type']?['@type'] == 'ChatTypeSupergroup',
+      canTranslate: _messageText(message) != null,
+      canSeeInfo: _hasInteractionInfo(message),
     );
 
     if (result == null || !mounted) return;
@@ -632,6 +687,18 @@ class _ChatPageState extends State<ChatPage> {
         _startEditing(message);
       case MessageMenuAction.copy:
         _copyMessage(message);
+      case MessageMenuAction.translate:
+        await showMessageTranslationSheet(
+          context,
+          chatId: _chatId,
+          messageId: messageId,
+        );
+      case MessageMenuAction.info:
+        await showMessageInfoSheet(
+          context,
+          chatId: _chatId,
+          messageId: messageId,
+        );
       case MessageMenuAction.forward:
         await _forwardMessages([messageId]);
       case MessageMenuAction.select:
@@ -653,6 +720,35 @@ class _ChatPageState extends State<ChatPage> {
       case MessageMenuAction.delete:
         await _deleteMessages([message]);
     }
+  }
+
+  /// The plain text of [message], or null when it carries none.
+  ///
+  /// Both a text message and a captioned photo can be translated, and they
+  /// keep their text under different keys.
+  static String? _messageText(Map<String, dynamic> message) {
+    final content = message['content'] as Map<String, dynamic>?;
+    final text =
+        content?['text']?['text'] ?? content?['caption']?['text'];
+    if (text is! String || text.trim().isEmpty) return null;
+    return text;
+  }
+
+  /// Whether asking Telegram who reacted to or read [message] can return
+  /// anything.
+  ///
+  /// Reactions are listable whenever the message has any. Read receipts only
+  /// exist for one's own messages in a group, so an incoming message with no
+  /// reactions would open an empty sheet.
+  bool _hasInteractionInfo(Map<String, dynamic> message) {
+    final reactions =
+        message['interactionInfo']?['reactions']?['reactions'] as List?;
+    if (reactions != null && reactions.isNotEmpty) return true;
+
+    final chatType = _chat.value['type']?['@type'] as String?;
+    final isGroup =
+        chatType == 'ChatTypeBasicGroup' || chatType == 'ChatTypeSupergroup';
+    return isGroup && message['isOutgoing'] == true;
   }
 
   /// Enters edit mode for [message]: prefills the composer with its current
@@ -729,11 +825,11 @@ class _ChatPageState extends State<ChatPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
+              child: Text(context.l10n.cancel),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Delete for me'),
+              child: Text(context.l10n.deleteForMe),
             ),
             if (canRevoke)
               FilledButton(
@@ -742,7 +838,7 @@ class _ChatPageState extends State<ChatPage> {
                   foregroundColor: scheme.onError,
                 ),
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('For everyone'),
+                child: Text(context.l10n.forEveryone),
               ),
           ],
         );
@@ -1065,22 +1161,22 @@ class _ChatPageState extends State<ChatPage> {
     final url = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Add link'),
+        title: Text(context.l10n.addLink),
         content: TextField(
           controller: controller,
           autofocus: true,
           keyboardType: TextInputType.url,
-          decoration: const InputDecoration(hintText: 'https://example.com'),
+          decoration: const InputDecoration(hintText: 'https://abuchi.lol'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           TextButton(
             onPressed: () =>
                 Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('Add'),
+            child: Text(context.l10n.add),
           ),
         ],
       ),
@@ -1100,8 +1196,8 @@ class _ChatPageState extends State<ChatPage> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Photos'),
-              subtitle: const Text('Send one or several as an album'),
+              title: Text(context.l10n.photos),
+              subtitle: Text(context.l10n.sendAsAlbumHint),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickAndSendPhotos();
@@ -1109,7 +1205,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Camera'),
+              title: Text(context.l10n.camera),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickAndSendImage(isVideo: false, fromCamera: true);
@@ -1117,7 +1213,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             ListTile(
               leading: const Icon(Icons.videocam_outlined),
-              title: const Text('Video'),
+              title: Text(context.l10n.video),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickAndSendImage(isVideo: true);
@@ -1125,8 +1221,8 @@ class _ChatPageState extends State<ChatPage> {
             ),
             ListTile(
               leading: const Icon(Icons.video_camera_front_outlined),
-              title: const Text('Video message'),
-              subtitle: const Text('A round clip, up to a minute'),
+              title: Text(context.l10n.videoMessage),
+              subtitle: Text(context.l10n.videoMessageHint),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _recordAndSendVideoNote();
@@ -1134,7 +1230,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             ListTile(
               leading: const Icon(Icons.insert_drive_file_outlined),
-              title: const Text('Document'),
+              title: Text(context.l10n.document),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickAndSendDocument();
@@ -1142,7 +1238,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             ListTile(
               leading: const Icon(Icons.person_outlined),
-              title: const Text('Contact'),
+              title: Text(context.l10n.contact),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickAndSendContact();
@@ -1150,7 +1246,7 @@ class _ChatPageState extends State<ChatPage> {
             ),
             ListTile(
               leading: const Icon(Icons.poll_outlined),
-              title: const Text('Poll'),
+              title: Text(context.l10n.poll),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _createPoll();
@@ -1290,9 +1386,9 @@ class _ChatPageState extends State<ChatPage> {
     final picked = await Navigator.push<List<int>>(
       context,
       MaterialPageRoute(
-        builder: (context) => const ContactsPage(
+        builder: (context) => ContactsPage(
           selectable: true,
-          title: 'Share a contact',
+          title: context.l10n.shareAContact,
         ),
       ),
     );
@@ -1354,6 +1450,19 @@ class _ChatPageState extends State<ChatPage> {
     return user == null ? _chat.value : {..._chat.value, 'user': user};
   }
 
+  /// Asks for a new self-destruct timer and applies it.
+  Future<void> _setAutoDeleteTime() async {
+    final current =
+        (_chat.value['messageAutoDeleteTime'] as num?)?.toInt() ?? 0;
+    final seconds = await showAutoDeleteSheet(context, currentSeconds: current);
+    if (seconds == null || seconds == current) return;
+
+    await TDLibClient.setChatMessageAutoDeleteTime(
+      chatId: _chatId,
+      autoDeleteTime: seconds,
+    );
+  }
+
   Future<void> _openChatMenu() async {
     final action = await showChatMenu(
       context: context,
@@ -1369,6 +1478,8 @@ class _ChatPageState extends State<ChatPage> {
         _openSearch();
       case ChatMenuAction.selectMessages:
         _selection.value = const {};
+      case ChatMenuAction.autoDelete:
+        await _setAutoDeleteTime();
       case ChatMenuAction.scheduledMessages:
         Navigator.push(
           context,
@@ -1418,11 +1529,11 @@ class _ChatPageState extends State<ChatPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(title),
-        content: const Text('This cannot be undone.'),
+        content: Text(context.l10n.cannotBeUndone),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -1519,8 +1630,8 @@ class _ChatPageState extends State<ChatPage> {
                 autofocus: true,
                 onChanged: _onSearchChanged,
                 textInputAction: TextInputAction.search,
-                decoration: const InputDecoration(
-                  hintText: 'Search messages...',
+                decoration: InputDecoration(
+                  hintText: context.l10n.searchMessagesHint,
                   border: InputBorder.none,
                 ),
               ),
@@ -1532,18 +1643,18 @@ class _ChatPageState extends State<ChatPage> {
             actions: [
               IconButton(
                 icon: const Icon(Icons.search),
-                tooltip: 'Search in chat',
+                tooltip: context.l10n.searchInChat,
                 onPressed: _openSearch,
               ),
               if (_chatUserId() != null)
                 IconButton(
                   icon: const Icon(Icons.call),
-                  tooltip: 'Call',
+                  tooltip: context.l10n.call,
                   onPressed: _startVoiceCall,
                 ),
               IconButton(
                 icon: const Icon(Icons.more_vert),
-                tooltip: 'More',
+                tooltip: context.l10n.more,
                 onPressed: _openChatMenu,
               ),
             ],
@@ -1558,14 +1669,14 @@ class _ChatPageState extends State<ChatPage> {
     return AppBar(
       leading: IconButton(
         icon: const Icon(Icons.close),
-        tooltip: 'Cancel',
+        tooltip: context.l10n.cancel,
         onPressed: () => _selection.value = null,
       ),
       title: Text(count == 0 ? 'Select messages' : '$count selected'),
       actions: [
         IconButton(
           icon: const Icon(Icons.copy_outlined),
-          tooltip: 'Copy',
+          tooltip: context.l10n.copy,
           onPressed: count == 0
               ? null
               : () {
@@ -1581,7 +1692,7 @@ class _ChatPageState extends State<ChatPage> {
         ),
         IconButton(
           icon: const Icon(Icons.forward),
-          tooltip: 'Forward',
+          tooltip: context.l10n.forward,
           onPressed: count == 0
               ? null
               : () async {
@@ -1592,7 +1703,7 @@ class _ChatPageState extends State<ChatPage> {
         ),
         IconButton(
           icon: const Icon(Icons.delete_outline),
-          tooltip: 'Delete',
+          tooltip: context.l10n.delete,
           onPressed: count == 0 ? null : () => _deleteMessages(_selectedMessages()),
         ),
       ],
@@ -1694,11 +1805,12 @@ class _ChatPageState extends State<ChatPage> {
         }
         final supergroup = chat['supergroup'];
         if (supergroup != null) {
-          final count = supergroup['memberCount'] as int? ?? 0;
-          final label =
-              supergroup['isChannel'] == true ? 'subscribers' : 'members';
           return Text(
-            '${NumberFormat('#,###', 'en_US').format(count)} $label',
+            memberCountLabel(
+              context,
+              supergroup['memberCount'] as int? ?? 0,
+              isChannel: supergroup['isChannel'] == true,
+            ),
             style: mutedStyle,
           );
         }
@@ -1725,8 +1837,11 @@ class _ChatPageState extends State<ChatPage> {
           // the OS navigation buttons.
           return SizedBox(height: MediaQuery.paddingOf(context).bottom);
         }
-        return ChatComposer(
-          controller: _messageController,
+        return ValueListenableBuilder<List<Map<String, dynamic>>>(
+          valueListenable: _botCommands,
+          builder: (context, botCommands, child) => ChatComposer(
+            botCommands: botCommands,
+            controller: _messageController,
           focusNode: _messageFocusNode,
           replyTo: _replyTo,
           editing: _editing,
@@ -1736,8 +1851,9 @@ class _ChatPageState extends State<ChatPage> {
           onSticker: _onStickerPicked,
           onGif: _onGifPicked,
           onAttach: _showAttachMenu,
-          onFormat: _wrapSelection,
-          onInsertLink: _insertLink,
+            onFormat: _wrapSelection,
+            onInsertLink: _insertLink,
+          ),
         );
       },
     );
@@ -1751,10 +1867,10 @@ class _ChatPageState extends State<ChatPage> {
           valueListenable: _isLoading,
           builder: (context, isLoading, child) {
             if (messages.isEmpty && !isLoading) {
-              return const EmptyState(
+              return EmptyState(
                 icon: Icons.forum_outlined,
-                title: 'No messages yet',
-                subtitle: 'Send a message to start the conversation.',
+                title: context.l10n.noMessagesYet,
+                subtitle: context.l10n.chatEmptyHint,
                 lottieAsset: 'assets/lottie/empty.json',
               );
             }
@@ -1958,14 +2074,14 @@ class _ChatPageState extends State<ChatPage> {
               builder: (context, results, child) {
                 if (results.isEmpty) {
                   return _searchController.text.trim().isEmpty
-                      ? const EmptyState(
+                      ? EmptyState(
                           icon: Icons.search,
-                          title: 'Search messages',
-                          subtitle: 'Type to find messages in this chat.',
+                          title: context.l10n.searchMessages,
+                          subtitle: context.l10n.searchInChatHint,
                         )
-                      : const EmptyState(
+                      : EmptyState(
                           icon: Icons.search_off,
-                          title: 'No messages found',
+                          title: context.l10n.noMessagesFound,
                         );
                 }
                 return ListView.builder(
@@ -2009,7 +2125,7 @@ class _UnreadDivider extends StatelessWidget {
       color: scheme.primaryContainer,
       child: Center(
         child: Text(
-          'Unread messages',
+          context.l10n.unreadMessages,
           style: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: scheme.onPrimaryContainer,
               ),

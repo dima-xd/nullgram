@@ -1,0 +1,486 @@
+{
+  "@@locale": "en",
+  "passcodeSubtitle": "A local lock over the app itself",
+  "passcodeExplanation": "A passcode locks this app on this device. It is separate from two-step verification, which protects the account itself.",
+  "twoStepSubtitle": "A password on top of the login code",
+  "videoMessageHint": "A round clip, up to a minute",
+  "amoledDark": "AMOLED dark",
+  "about": "About",
+  "accept": "Accept",
+  "add": "Add",
+  "addProxy": "Add a proxy",
+  "addAnswer": "Add an answer",
+  "addFromCopiedLink": "Add from a copied link",
+  "addLink": "Add link",
+  "addMembers": "Add members",
+  "all": "All",
+  "anonymousVoting": "Anonymous voting",
+  "passcodeDisableWarning": "Anyone with this phone unlocked will be able to open the app.",
+  "sharedMediaEmpty": "Anything shared in this chat shows up here.",
+  "archivedChatsTitle": "Archived Chats",
+  "archivedChats": "Archived chats",
+  "atLeastFourCharacters": "At least 4 characters",
+  "autoDeleteMessages": "Auto-delete messages",
+  "automaticMediaDownload": "Automatic media download",
+  "backspace": "Backspace",
+  "bio": "Bio",
+  "blockedUsers": "Blocked users",
+  "botCommands": "Bot commands",
+  "call": "Call",
+  "callBack": "Call back",
+  "calls": "Calls",
+  "callsEmpty": "Calls you make and receive will appear here.",
+  "camera": "Camera",
+  "cancel": "Cancel",
+  "changePasscode": "Change passcode",
+  "changePhoto": "Change photo",
+  "channels": "Channels",
+  "checkAgain": "Check again",
+  "clear": "Clear",
+  "clearCache": "Clear cache",
+  "clearCacheQuestion": "Clear cache?",
+  "clearHistory": "Clear history",
+  "clearHistoryQuestion": "Clear history?",
+  "contact": "Contact",
+  "contacts": "Contacts",
+  "contactsEmpty": "Contacts you add on Telegram will show up here.",
+  "continueLabel": "Continue",
+  "copied": "Copied",
+  "copiedToClipboard": "Copied to clipboard",
+  "copy": "Copy",
+  "copyLink": "Copy link",
+  "copyTranslation": "Copy translation",
+  "passwordChangeFailed": "Could not change the password. Check the old one.",
+  "joinFailed": "Could not join the chat",
+  "secretChatFailed": "Could not start a secret chat",
+  "createPoll": "Create poll",
+  "createYourAccount": "Create your account",
+  "currentPassword": "Current password",
+  "dark": "Dark",
+  "dataAndStorage": "Data and storage",
+  "decline": "Decline",
+  "delete": "Delete",
+  "deleteChat": "Delete chat",
+  "deleteForMe": "Delete for me",
+  "deliveredWhenBack": "Delivered once they are back",
+  "description": "Description",
+  "descriptionOptional": "Description (optional)",
+  "devices": "Devices",
+  "document": "Document",
+  "downloadAutomatically": "Download automatically",
+  "downloadedMedia": "Downloaded media",
+  "clearCacheExplanation": "Downloaded photos, videos and files will be removed from this device. They stay on Telegram and download again when opened.",
+  "edit": "Edit",
+  "editBio": "Edit bio",
+  "editMessage": "Edit message",
+  "editName": "Edit name",
+  "editUsername": "Edit username",
+  "endCall": "End",
+  "enterTheCode": "Enter the code",
+  "enterYourPassword": "Enter your password",
+  "enterPhoneToContinue": "Enter your phone number to continue",
+  "files": "Files",
+  "filesAndVoice": "Files and voice",
+  "findPeopleAndGroups": "Find people and groups",
+  "biometricsHint": "Fingerprint or face, when enrolled",
+  "firstName": "First name",
+  "forEveryone": "For everyone",
+  "forward": "Forward",
+  "forwardTo": "Forward to…",
+  "gif": "GIF",
+  "generatingQrCode": "Generating QR code...",
+  "groups": "Groups",
+  "hintOptional": "Hint (optional)",
+  "scheduledEmptyHint": "Hold the send button in a chat to schedule a message.",
+  "holdToRecord": "Hold to record a voice message",
+  "notificationScopeHint": "Individual chats keep their own mute setting, which overrides these defaults.",
+  "inviteLink": "Invite link",
+  "inviteLinkCopied": "Invite link copied",
+  "join": "Join",
+  "languagePacks": "Language packs",
+  "lastName": "Last name",
+  "lastNameOptional": "Last name (optional)",
+  "leaveChat": "Leave chat",
+  "light": "Light",
+  "links": "Links",
+  "localDatabase": "Local database",
+  "lockTheApp": "Lock the app",
+  "loginByQrCode": "Log in by QR Code",
+  "loginByPhone": "Log in by phone number",
+  "logOut": "Log out",
+  "logOutQuestion": "Log out?",
+  "media": "Media",
+  "autoDownloadExplanation": "Media under these sizes appears without a tap. Anything larger keeps its download button.",
+  "members": "Members",
+  "messageActions": "Message actions",
+  "microphonePermissionRequired": "Microphone permission required",
+  "more": "More",
+  "multipleAnswers": "Multiple answers",
+  "music": "Music",
+  "mute": "Mute",
+  "myProfile": "My Profile",
+  "name": "Name",
+  "newChannelTitle": "New Channel",
+  "newGroupTitle": "New Group",
+  "newChannel": "New channel",
+  "newGroup": "New group",
+  "newMessage": "New message",
+  "autoDeleteExplanation": "New messages in this chat are deleted for everyone after the chosen time. Messages already sent are unaffected.",
+  "newPassword": "New password",
+  "newPoll": "New poll",
+  "noProxyLinkInClipboard": "No Telegram proxy link found in the clipboard.",
+  "noCallsYet": "No calls yet",
+  "noChatsYet": "No chats yet",
+  "noContacts": "No contacts",
+  "noContactsFound": "No contacts found",
+  "noCountriesFound": "No countries found",
+  "noMembersToShow": "No members to show",
+  "noMessagesFound": "No messages found",
+  "noMessagesYet": "No messages yet",
+  "noProxiesYet": "No proxies yet. Add one manually, or copy a t.me/proxy link and use the paste button.",
+  "noSavedGifs": "No saved GIFs",
+  "noStickersYet": "No stickers yet",
+  "noInteractionInfo": "Nobody has reacted to this message, and Telegram does not report who read it here.",
+  "nobodyBlocked": "Nobody is blocked. Blocked users cannot message you or see when you are online.",
+  "nothingScheduled": "Nothing scheduled",
+  "notificationsAndSounds": "Notifications and sounds",
+  "appLocked": "Nullgram is locked",
+  "qrInstructions": "Open Telegram on your phone, go to Settings › Devices › Link Desktop Device, and scan this code.",
+  "passcode": "Passcode",
+  "passcodeLock": "Passcode lock",
+  "password": "Password",
+  "passwordOptional": "Password (optional)",
+  "phone": "Phone",
+  "phoneNumber": "Phone number",
+  "photos": "Photos",
+  "pickDateAndTime": "Pick a date and time",
+  "poll": "Poll",
+  "port": "Port",
+  "privacyAndSecurity": "Privacy and security",
+  "privateChats": "Private chats",
+  "proxy": "Proxy",
+  "question": "Question",
+  "reactionsAndViews": "Reactions and views",
+  "recoveryEmailIsSet": "Recovery email is set",
+  "remove": "Remove",
+  "removeFromGroup": "Remove from group",
+  "repeatThePasscode": "Repeat the passcode",
+  "reply": "Reply",
+  "resendCode": "Resend code",
+  "save": "Save",
+  "savedMessages": "Saved Messages",
+  "savedToGallery": "Saved to gallery",
+  "scheduleMessage": "Schedule message",
+  "scheduledMessages": "Scheduled messages",
+  "search": "Search",
+  "searchChatsAndMessages": "Search chats and messages",
+  "searchChatsHint": "Search chats...",
+  "searchContacts": "Search contacts",
+  "searchCountry": "Search country",
+  "searchInChat": "Search in chat",
+  "searchMessages": "Search messages",
+  "searchMessagesHint": "Search messages...",
+  "secret": "Secret",
+  "select": "Select",
+  "selectMessages": "Select messages",
+  "sendHoldForOptions": "Send (hold for options)",
+  "chatEmptyHint": "Send a message to start the conversation.",
+  "sendMessage": "Send message",
+  "sendAsAlbumHint": "Send one or several as an album",
+  "sendWhenOnline": "Send when online",
+  "sendWithoutSound": "Send without sound",
+  "server": "Server",
+  "setAPasscode": "Set a passcode",
+  "settings": "Settings",
+  "share": "Share",
+  "shareAContact": "Share a contact",
+  "sharedMedia": "Shared media",
+  "showInChat": "Show in chat",
+  "signOut": "Sign out",
+  "signOutDeviceQuestion": "Sign this device out?",
+  "signUp": "Sign up",
+  "speaker": "Speaker",
+  "startSecretChat": "Start secret chat",
+  "submit": "Submit",
+  "system": "System",
+  "termsOfService": "Terms of Service",
+  "passwordNotAccepted": "That password was not accepted.",
+  "mtprotoSecretHint": "The hex or base64 secret from the proxy link",
+  "silentSendHint": "The recipient is not notified",
+  "buttonNotSupported": "This button is not supported yet",
+  "cannotBeUndone": "This cannot be undone.",
+  "memberListHidden": "This chat does not expose its member list to you.",
+  "thisDevice": "This device",
+  "noBiometricsEnrolled": "This device has no biometrics enrolled.",
+  "inviteLinkInvalid": "This invite link is no longer valid",
+  "registrationSubtitle": "This number is not registered yet. Choose the name other people will see.",
+  "translate": "Translate",
+  "translation": "Translation",
+  "tryDifferentSearch": "Try a different search term.",
+  "turnOff": "Turn off",
+  "turnOffPasscodeQuestion": "Turn off the passcode?",
+  "turnOffTwoStep": "Turn off two-step verification",
+  "turnOffTwoStepQuestion": "Turn off two-step verification?",
+  "twoStepVerification": "Two-step verification",
+  "twoStepUnavailable": "Two-step verification is unavailable right now.",
+  "searchInChatHint": "Type to find messages in this chat.",
+  "searchGlobalHint": "Type to search across Telegram.",
+  "unblock": "Unblock",
+  "unlock": "Unlock",
+  "unlockPrompt": "Unlock Nullgram",
+  "unlockWithBiometrics": "Unlock with biometrics",
+  "unreadMessages": "Unread messages",
+  "useAProxy": "Use a proxy",
+  "useBiometrics": "Use biometrics",
+  "amoledDarkSubtitle": "Use true black surfaces",
+  "username": "Username",
+  "usernameOptional": "Username (optional)",
+  "verify": "Verify",
+  "video": "Video",
+  "videoMessage": "Video message",
+  "videos": "Videos",
+  "voice": "Voice",
+  "welcomeToNullgram": "Welcome to Nullgram",
+  "writeAMessage": "Write a message...",
+  "wrongNumber": "Wrong number?",
+  "logOutWarning": "You will need to sign in again to use the app.",
+  "twoStepDisableWarning": "Your account will be protected by the login code alone.",
+  "chatsEmptyHint": "Your conversations will appear here.",
+  "clearCacheNote": "Your messages are not affected — only files cached on this device are removed.",
+  "proxyInUse": "· in use",
+  "never": "Never",
+  "passcodeMinLengthHint": "At least 4 digits",
+  "codesDoNotMatch": "The codes do not match",
+  "wrongPasscode": "Wrong passcode",
+  "language": "Language",
+  "appearance": "Appearance",
+  "preferences": "Preferences",
+  "account": "Account",
+  "mobileData": "Mobile data",
+  "wifi": "Wi-Fi",
+  "lockImmediately": "Immediately",
+  "lockAfterOneMinute": "After 1 minute",
+  "lockAfterFiveMinutes": "After 5 minutes",
+  "lockAfterOneHour": "After 1 hour",
+  "autoDeleteOff": "Auto-delete: off",
+  "autoDeleteOn": "Auto-delete: on",
+  "off": "Off",
+  "oneDay": "1 day",
+  "oneWeek": "1 week",
+  "oneMonth": "1 month",
+  "viewProfile": "View profile",
+  "chatInfo": "Chat info",
+  "unmute": "Unmute",
+  "blockUser": "Block user",
+  "unblockUser": "Unblock user",
+  "pin": "Pin",
+  "unpin": "Unpin",
+  "reactions": "Reactions",
+  "readBy": "Read by",
+  "editProxy": "Edit proxy",
+  "proxyRouteHint": "Route the connection through the selected server",
+  "addProxyFirst": "Add a proxy first",
+  "proxyChecking": "checking…",
+  "proxyUnavailable": "unavailable",
+  "translationFailed": "Telegram could not translate this message.",
+  "accountCreationFailed": "Could not create the account. Try again.",
+  "acceptTermsQuestion": "Do you accept the Terms of Service?",
+  "incorrectPassword": "Incorrect password. Please try again.",
+  "passwordUpdated": "Password updated",
+  "twoStepDisabled": "Two-step verification disabled",
+  "confirmYourPassword": "Confirm your password",
+  "twoStepPassword": "Two-step password",
+  "passwordIsOn": "Password is on",
+  "passwordIsOff": "Password is off",
+  "setPassword": "Set password",
+  "changePassword": "Change password",
+  "notifyPrivateDescription": "Messages from people and bots",
+  "notifyGroupsDescription": "Messages in groups you are a member of",
+  "notifyChannelsDescription": "Posts from channels you follow",
+  "followSystem": "Follow the system",
+  "interfaceLanguage": "Interface language",
+  "groupName": "Group name",
+  "channelName": "Channel name",
+  "createGroup": "Create group",
+  "createChannel": "Create channel",
+  "groupCreateFailed": "Could not create the group. Try again.",
+  "channelCreateFailed": "Could not create the channel. Try again.",
+  "nothingSharedYet": "Nothing here yet",
+  "searchChats": "Search chats",
+  "noChatsFound": "No chats found",
+  "keyboard": "Keyboard",
+  "emojiAndStickers": "Emoji and stickers",
+  "appVersionLabel": "Nullgram {version}",
+  "@appVersionLabel": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "pollAnswerLabel": "Answer {number}",
+  "@pollAnswerLabel": {
+    "placeholders": {
+      "number": {
+        "type": "int"
+      }
+    }
+  },
+  "hintWithText": "Hint: {hint}",
+  "@hintWithText": {
+    "placeholders": {
+      "hint": {
+        "type": "String"
+      }
+    }
+  },
+  "joinChatQuestion": "Join {title}?",
+  "@joinChatQuestion": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "usernameNotFound": "No Telegram account found for @{username}",
+  "@usernameNotFound": {
+    "placeholders": {
+      "username": {
+        "type": "String"
+      }
+    }
+  },
+  "resendCodeIn": "Resend code in {seconds}s",
+  "@resendCodeIn": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "forwardedFrom": "Forwarded from {name}",
+  "@forwardedFrom": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "upToSize": "Up to {size}",
+  "@upToSize": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "reactionsWithCount": "Reactions · {count}",
+  "@reactionsWithCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "readByWithCount": "Read by · {count}",
+  "@readByWithCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "failedToDownload": "Download failed: {error}",
+  "@failedToDownload": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "failedToPlay": "Playback failed: {error}",
+  "@failedToPlay": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "failedToSave": "Could not save: {error}",
+  "@failedToSave": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "failedToShare": "Could not share: {error}",
+  "@failedToShare": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "membersCount": "{count} members",
+  "@membersCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "subscribersCount": "{count} subscribers",
+  "@subscribersCount": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "pingMilliseconds": "{milliseconds} ms",
+  "@pingMilliseconds": {
+    "placeholders": {
+      "milliseconds": {
+        "type": "int"
+      }
+    }
+  },
+  "autoDeleteAfterDays": "Auto-delete: {days} days",
+  "@autoDeleteAfterDays": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "addAccount": "Add account",
+  "switchAccounts": "Switch accounts",
+  "logOutAccountQuestion": "Log out of {name}?",
+  "@logOutAccountQuestion": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "accountUnreadMessages": "{count} unread",
+  "@accountUnreadMessages": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "phoneNumberInvalid": "This phone number is not valid.",
+  "appVerificationFailed": "Telegram could not verify this app. Signing in needs an api_id of your own from my.telegram.org.",
+  "apiIdPublishedFlood": "This api_id has been published, so Telegram no longer accepts sign-ins with it. Get one of your own at my.telegram.org.",
+  "signInFailed": "Could not sign in: {reason}",
+  "@signInFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  }
+}

@@ -37,3 +37,8 @@ const String updateBasicGroupConst = 'UpdateBasicGroup';
 const String updateMessageSendSucceededConst = 'UpdateMessageSendSucceeded';
 const String updateMessageSendFailedConst = 'UpdateMessageSendFailed';
 const String updateMessageIsPinnedConst = 'UpdateMessageIsPinned';
+const String updateUnreadChatCountConst = 'UpdateUnreadChatCount';
+const String updateApplicationVerificationRequiredConst =
+    'UpdateApplicationVerificationRequired';
+const String updateApplicationRecaptchaVerificationRequiredConst =
+    'UpdateApplicationRecaptchaVerificationRequired';

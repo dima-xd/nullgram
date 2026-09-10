@@ -19,14 +19,63 @@ class TDLibClient {
   static final _authUpdatesController = ReplaySubject<Map<String, dynamic>>();
   static Stream<Map<String, dynamic>> get authStateUpdates => _authUpdatesController.stream;
 
-  static final _chatUpdatesController = ReplaySubject<Map<String, dynamic>>();
-  static Stream<Map<String, dynamic>> get chatUpdates => _chatUpdatesController.stream;
+  static final _chatUpdatesController = PublishSubject<Map<String, dynamic>>();
+
+  /// Chat updates of the account on screen, preceded by the recent ones.
+  ///
+  /// A listener subscribes late by design — `ChatStore` only starts once the
+  /// account is authorized, and a media widget only while it is mounted — so
+  /// the last updates are handed over on subscription.
+  ///
+  /// This replaced a `ReplaySubject`, whose buffer was neither cleared nor
+  /// bounded: it held every chat update of the whole session, so subscribing
+  /// after an account switch replayed *another* account's chats into the store
+  /// (one account's chats appearing in another's list), and every newly
+  /// mounted widget re-processed the entire history.
+  static Stream<Map<String, dynamic>> get chatUpdates =>
+      _replaying(_chatReplay, _chatUpdatesController.stream);
 
   static final _messagesController = PublishSubject<Map<String, dynamic>>();
   static Stream<Map<String, dynamic>> get messsagesUpdates => _messagesController.stream;
 
-  static final _filesController = ReplaySubject<Map<String, dynamic>>();
-  static Stream<Map<String, dynamic>> get filesUpdates => _filesController.stream;
+  static final _filesController = PublishSubject<Map<String, dynamic>>();
+
+  /// File updates of the account on screen, preceded by the recent ones, so a
+  /// download that finished just before a widget mounted is not missed. See
+  /// [chatUpdates] for why this is not a `ReplaySubject`.
+  static Stream<Map<String, dynamic>> get filesUpdates =>
+      _replaying(_fileReplay, _filesController.stream);
+
+  static final List<Map<String, dynamic>> _chatReplay = [];
+  static final List<Map<String, dynamic>> _fileReplay = [];
+
+  /// How many recent updates each replay buffer keeps.
+  ///
+  /// Enough to cover the gap between an update arriving and a listener
+  /// subscribing, and small enough that handing the buffer to a newly mounted
+  /// widget costs nothing. The full state is always recoverable another way —
+  /// `getChats` for the lists, `getFile` for a download.
+  static const int _replayLimit = 200;
+
+  static void _buffer(
+    List<Map<String, dynamic>> buffer,
+    Map<String, dynamic> update,
+  ) {
+    buffer.add(update);
+    if (buffer.length > _replayLimit) buffer.removeAt(0);
+  }
+
+  /// Hands a new listener the contents of [buffer], then [live].
+  ///
+  /// The buffer is drained in microtasks, which all run before the next
+  /// platform message, so nothing arrives in between and is lost.
+  static Stream<Map<String, dynamic>> _replaying(
+    List<Map<String, dynamic>> buffer,
+    Stream<Map<String, dynamic>> live,
+  ) async* {
+    yield* Stream.fromIterable(List.of(buffer));
+    yield* live;
+  }
 
   // Call signaling must never replay stale state to a new listener, so this is
   // a PublishSubject (broadcast, no buffer) unlike chat/file streams.
@@ -44,6 +93,136 @@ class TDLibClient {
   /// is correct as soon as it is built.
   static Stream<String> get connectionStateUpdates =>
       _connectionStateController.stream;
+
+  // ---------------------------------------------------------------------------
+  // Accounts
+  //
+  // Every signed-in account has its own TDLib client in the native bridge, and
+  // all of them stay online. Only the active account's updates drive the UI;
+  // the rest are published on [backgroundUpdates] so notifications and unread
+  // badges keep working for accounts that are not on screen.
+  // ---------------------------------------------------------------------------
+
+  /// The account id an install starts with, before any account is added.
+  static const int defaultAccountId = 1;
+
+  /// The account whose updates reach the UI, and the default target of every
+  /// request that does not name an account explicitly.
+  ///
+  /// Kept in step with the bridge by [setActiveAccount]; assigning it directly
+  /// would leave the native side pointing at the previous client.
+  static int activeAccountId = defaultAccountId;
+
+  static final _backgroundController = PublishSubject<Map<String, dynamic>>();
+
+  /// Updates belonging to an account other than [activeAccountId].
+  ///
+  /// Each event carries its origin in `@accountId`. No buffering: a late
+  /// listener must not be woken by a message that was already handled.
+  static Stream<Map<String, dynamic>> get backgroundUpdates =>
+      _backgroundController.stream;
+
+  static final _unreadController = PublishSubject<Map<String, dynamic>>();
+
+  /// `UpdateUnreadChatCount` from every account, active or not, tagged with
+  /// `@accountId`. Feeds the per-account badges in the account switcher.
+  static Stream<Map<String, dynamic>> get unreadCountUpdates =>
+      _unreadController.stream;
+
+  /// Starts a TDLib client for [accountId] if one is not running yet.
+  ///
+  /// The new client immediately reports `AuthorizationStateWaitTdlibParameters`,
+  /// so [setTdlibParameters] must follow with that account's own database
+  /// directory — two accounts sharing a directory would corrupt both.
+  static Future<void> createAccount(int accountId) =>
+      _channel.invokeMethod('createAccount', {'accountId': accountId});
+
+  /// Points the bridge and [activeAccountId] at [accountId].
+  static Future<void> setActiveAccount(int accountId) async {
+    activeAccountId = accountId;
+    // The buffers describe the account leaving the screen. Handing them to the
+    // next account's store is precisely how two accounts' chats get mixed.
+    _chatReplay.clear();
+    _fileReplay.clear();
+    await _channel.invokeMethod('setActiveAccount', {'accountId': accountId});
+  }
+
+  /// Shuts the client of [accountId] down and forgets it.
+  static Future<void> closeAccount(int accountId) =>
+      _channel.invokeMethod('closeAccount', {'accountId': accountId});
+
+  /// Re-publishes the active account's authorization state on
+  /// [authStateUpdates].
+  ///
+  /// Switching accounts produces no new `updateAuthorizationState` — the other
+  /// client reached its state long ago — so the state has to be replayed for
+  /// the app's auth navigation to react to the switch at all.
+  static Future<void> refreshAuthorizationState() async {
+    final state = await _request({"@type": "getAuthorizationState"});
+    if (state == null) return;
+    _authUpdatesController.add({...state, '@accountId': activeAccountId});
+  }
+
+  /// Tells TDLib that this application cannot verify itself.
+  ///
+  /// Telegram asks for a Play Integrity or reCAPTCHA token only when the app
+  /// presents official application credentials, and it validates that token
+  /// against a key bound to the official app, which no other package can
+  /// satisfy. Answering with an empty token fails the pending request at once
+  /// with `VERIFICATION_FAILED`, instead of leaving the login screen waiting
+  /// forever with nothing to show. Signing in needs an `api_id` of your own
+  /// from my.telegram.org, for which no verification is required.
+  static Future<void> _abortApplicationVerification(
+    Map<String, dynamic> update,
+  ) async {
+    logger.w(
+      'TDLib asked for app verification (${update['@type']}); aborting it. '
+      'Signing in needs an api_id of your own from my.telegram.org.',
+    );
+    await _execute(
+      {
+        "@type": "setApplicationVerificationToken",
+        "verificationId": update['verificationId'],
+        "token": "",
+      },
+      accountId: update['@accountId'] as int?,
+    );
+  }
+
+  /// Sends [request] and returns TDLib's error message, or null on success.
+  ///
+  /// Used by the login flow, where a failure has to be shown rather than only
+  /// logged: a rejected number or a refused app verification is otherwise
+  /// indistinguishable from the button doing nothing at all.
+  static Future<String?> _errorOf(
+    Map<String, dynamic> request, {
+    int? accountId,
+  }) async {
+    final target = accountId ?? activeAccountId;
+    final dynamic result;
+    try {
+      result = await _channel.invokeMethod(
+        'send',
+        _sendArgs(jsonEncode(request), accountId),
+      );
+    } catch (e) {
+      logger.e('TDLib ${request['@type']} failed on account $target',
+          error: e);
+      return e is PlatformException ? e.message ?? 'FAILED' : 'FAILED';
+    }
+
+    final message = result is Map ? result['message'] : null;
+    if (message is! String) return null;
+    logger.w('TDLib ${request['@type']} error on account $target: $message');
+    return message;
+  }
+
+  /// The arguments of a `send` aimed at [accountId], or at the active account
+  /// when it is null.
+  static Map<String, Object?> _sendArgs(String json, int? accountId) => {
+        'json': json,
+        'accountId': accountId ?? activeAccountId,
+      };
 
   static Future<void> sendMessage({
     required int chatId,
@@ -396,12 +575,16 @@ class TDLibClient {
   /// The TDLib `chat` object has no embedded user — only a `type`. For a
   /// private/secret chat, read the user id from `chat['type']['userId']` and
   /// resolve the user here.
-  static Future<Map<String, dynamic>?> getUser({required int userId}) async {
+  static Future<Map<String, dynamic>?> getUser({
+    required int userId,
+    int? accountId,
+  }) async {
     final jsonMap = {"@type": "getUser", "userId": userId};
 
-    final result = await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap),
-    });
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode(jsonMap), accountId),
+    );
 
     if (result["data"] == null) return null;
     final data = result["data"] is String
@@ -428,10 +611,11 @@ class TDLibClient {
   }
 
   /// Fetches the current user (the logged-in account).
-  static Future<Map<String, dynamic>?> getMe() async {
-    final result = await _channel.invokeMethod('send', {
-      'json': '{"@type":"getMe"}',
-    });
+  static Future<Map<String, dynamic>?> getMe({int? accountId}) async {
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs('{"@type":"getMe"}', accountId),
+    );
 
     if (result["data"] == null) return null;
     final data = result["data"] is String
@@ -492,11 +676,16 @@ class TDLibClient {
     await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
   }
 
-  /// Logs the current user out, returning the app to the auth flow.
-  static Future<void> logOut() async {
-    await _channel.invokeMethod('send', {
-      'json': '{"@type":"logOut"}'
-    });
+  /// Logs an account out, returning the app to the auth flow.
+  ///
+  /// Defaults to the active account; [accountId] logs another one out without
+  /// bringing it on screen, which is how a removed account is dropped from the
+  /// switcher.
+  static Future<void> logOut({int? accountId}) async {
+    await _channel.invokeMethod(
+      'send',
+      _sendArgs('{"@type":"logOut"}', accountId),
+    );
   }
 
   /// Deletes messages in a chat.
@@ -709,7 +898,15 @@ class TDLibClient {
     });
   }
 
-  static Future<void> downloadFile({required int fileId}) async {
+  /// Starts downloading [fileId].
+  ///
+  /// [accountId] matters more here than it looks: a file id is meaningful only
+  /// to the client that issued it, so a download started for one account must
+  /// never be sent to another's client — it would fetch an unrelated file.
+  static Future<void> downloadFile({
+    required int fileId,
+    int? accountId,
+  }) async {
     final jsonMap = {
       "@type": "downloadFile",
       "fileId": fileId,
@@ -717,9 +914,10 @@ class TDLibClient {
       "synchronous": true,
     };
 
-    await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap)
-    });
+    await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode(jsonMap), accountId),
+    );
   }
 
   /// Returns TDLib's current, authoritative [File] state for [fileId].
@@ -774,31 +972,30 @@ class TDLibClient {
   /// to recover the current chat list. This is what lets the chat list survive
   /// a Dart hot restart: the native TDLib session persists and still holds the
   /// chats, even though the Dart-side update buffers were wiped.
-  static Future<List<int>> getChats({int limit = 200}) async {
-    final jsonMap = {
-      "@type": "getChats",
-      "chatList": {"@type": "chatListMain"},
-      "limit": limit,
-    };
-
-    final result = await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap),
-    });
-
-    if (result["data"] == null) return [];
-    final data = result["data"] is String
-        ? jsonDecode(result["data"]) as Map<String, dynamic>
-        : result["data"] as Map<String, dynamic>;
-    return (data["chatIds"] as List?)?.map((e) => e as int).toList() ?? [];
-  }
+  static Future<List<int>> getChats({int limit = 200, int? accountId}) async =>
+      _idList(
+        await _request(
+          {
+            "@type": "getChats",
+            "chatList": {"@type": "chatListMain"},
+            "limit": limit,
+          },
+          accountId: accountId,
+        ),
+        'chatIds',
+      );
 
   /// Fetches the full chat object for [chatId] from TDLib.
-  static Future<Map<String, dynamic>?> getChat({required int chatId}) async {
+  static Future<Map<String, dynamic>?> getChat({
+    required int chatId,
+    int? accountId,
+  }) async {
     final jsonMap = {"@type": "getChat", "chatId": chatId};
 
-    final result = await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap),
-    });
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode(jsonMap), accountId),
+    );
 
     if (result["data"] == null) return null;
     final data = result["data"] is String
@@ -807,16 +1004,16 @@ class TDLibClient {
     return Map<String, dynamic>.from(data);
   }
 
-  static Future<String?> loadChats({int limit = 20}) async {
-    final jsonMap = {
-      "@type": "loadChats",
-      "limit": limit,
-    };
-
-    var result = await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap)
-    });
-    return result['type'];
+  /// Asks TDLib to load the next slice of the main chat list.
+  ///
+  /// Answers "Ok" while chats remain and an error once the list is exhausted.
+  static Future<String?> loadChats({int limit = 20, int? accountId}) async {
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode({"@type": "loadChats", "limit": limit}), accountId),
+    );
+    if (result is! Map) return null;
+    return result['type'] as String?;
   }
 
   static Future<String> checkAuthenticationCode({required String code}) async {
@@ -835,39 +1032,29 @@ class TDLibClient {
     return "";
   }
 
-  static Future<void> setAuthenticationPhoneNumber({required String phoneNumber}) async {
-    final jsonMap = {
-      "@type": "setAuthenticationPhoneNumber",
-      "phoneNumber": phoneNumber,
-    };
+  /// Starts phone-number sign-in, returning TDLib's error message on failure.
+  static Future<String?> setAuthenticationPhoneNumber({
+    required String phoneNumber,
+  }) =>
+      _errorOf({
+        "@type": "setAuthenticationPhoneNumber",
+        "phoneNumber": phoneNumber,
+      });
 
-    await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap),
-    });
-  }
+  static Future<void> checkAuthenticationPassword({
+    required String password,
+  }) =>
+      _execute({
+        "@type": "checkAuthenticationPassword",
+        "password": password,
+      });
 
-  static Future<void> checkAuthenticationPassword({required String password}) async {
-    final jsonMap = {
-      "@type": "checkAuthenticationPassword",
-      "password": password,
-    };
+  /// Starts QR sign-in, returning TDLib's error message on failure.
+  static Future<String?> requestQrCodeAuthentication() =>
+      _errorOf({"@type": "requestQrCodeAuthentication"});
 
-    await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap),
-    });
-  }
-
-  static Future<void> requestQrCodeAuthentication() async {
-    await _channel.invokeMethod('send', {
-      'json': '{"@type":"requestQrCodeAuthentication"}'
-    });
-  }
-
-  static Future<void> resendAuthenticationCode() async {
-    await _channel.invokeMethod('send', {
-      'json': '{"@type":"resendAuthenticationCode"}'
-    });
-  }
+  static Future<void> resendAuthenticationCode() =>
+      _execute({"@type": "resendAuthenticationCode"});
 
   static Future<void> setTdlibParameters({
     required bool useTestDc,
@@ -884,6 +1071,7 @@ class TDLibClient {
     required String deviceModel,
     required String systemVersion,
     required String applicationVersion,
+    int? accountId,
   }) async {
     final jsonMap = {
       "@type": "setTdlibParameters",
@@ -903,15 +1091,14 @@ class TDLibClient {
       "applicationVersion": applicationVersion
     };
 
-    await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap),
-    });
+    await _execute(jsonMap, accountId: accountId);
   }
 
-  static Future<String> getAuthorizationState() async {
-    final result = await _channel.invokeMethod('send', {
-      'json': '{"@type":"getAuthorizationState"}'
-    });
+  static Future<String> getAuthorizationState({int? accountId}) async {
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs('{"@type":"getAuthorizationState"}', accountId),
+    );
     return result["type"];
   }
 
@@ -1009,16 +1196,59 @@ class TDLibClient {
 
   static void initTdlibUpdates() {
     _updatesChannel.receiveBroadcastStream().listen((event) {
-      final update = jsonDecode(event);
+      final Map<String, dynamic> update;
+      try {
+        update = jsonDecode(event) as Map<String, dynamic>;
+      } catch (e) {
+        // A malformed event must not kill the subscription, which would leave
+        // the app deaf to every later update.
+        logger.e('Undecodable TDLib event', error: e);
+        return;
+      }
       final type = update['@type'];
 
       if (type == "UpdateOption" || type == updateUnreadMessageCountConst) {
         return;
       }
 
+      // The bridge reports a failure in one of its own handlers this way.
+      if (type == 'UpdateBridgeError') {
+        logger.w('TDLib bridge error: ${update['message']}');
+        return;
+      }
+
+      // Answered for any account, active or not: TDLib holds the request that
+      // triggered it until the verification is resolved.
+      if (type == updateApplicationVerificationRequiredConst ||
+          type == updateApplicationRecaptchaVerificationRequiredConst) {
+        _abortApplicationVerification(update);
+        return;
+      }
+
+      // Unread totals are wanted from every account, so they are split off
+      // before the active-account filter below.
+      if (type == updateUnreadChatCountConst) {
+        _unreadController.add(update);
+        return;
+      }
+
+      // An update tagged with another account must never reach the stores and
+      // pages, which all describe the account currently on screen.
+      final accountId = update['@accountId'] as int?;
+      if (accountId != null && accountId != activeAccountId) {
+        _backgroundController.add(update);
+        return;
+      }
+
       switch (type) {
         case updateAuthorizationStateConst:
-          _authUpdatesController.add(update['authorizationState']);
+          // The account tag sits on the envelope, but listeners only see the
+          // state, so it is copied across: with several accounts online, "who
+          // is logging out" is as important as "what happened".
+          _authUpdatesController.add({
+            ...update['authorizationState'] as Map<String, dynamic>,
+            '@accountId': accountId ?? activeAccountId,
+          });
         case updateConnectionStateConst:
           _connectionStateController.add(
             update['state']?['@type'] as String? ?? '',
@@ -1031,6 +1261,7 @@ class TDLibClient {
           updateChatNotificationSettingsConst || updateChatPermissionsConst ||
           updateChatIsMarkedAsUnreadConst || updateChatDraftMessageConst ||
           updateChatUnreadMentionCountConst || updateChatEmojiStatusConst:
+          _buffer(_chatReplay, update);
           _chatUpdatesController.add(update);
         case updateNewMessageConst || updateDeleteMessagesConst ||
           updateMessageInteractionInfoConst || updateMessageContentConst ||
@@ -1038,13 +1269,29 @@ class TDLibClient {
           updateMessageSendSucceededConst || updateMessageSendFailedConst:
           _messagesController.add(update);
         case updateFileConst:
+          _buffer(_fileReplay, update);
           _filesController.add(update);
         case updateCallConst || updateNewCallSignalingDataConst:
           _callController.add(update);
         default:
-          logger.i("Skipped update of type: $type");
+          _logUnhandled(type);
       }
     });
+  }
+
+  /// The update types already reported as unhandled.
+  static final Set<String> _unhandledTypes = {};
+
+  /// Reports an update no store folds in, once per type.
+  ///
+  /// TDLib pushes hundreds of these while a session syncs, and the logger
+  /// captures a stack trace for every line it prints, which by itself is
+  /// enough to stutter the first seconds of the app. The name of a type is all
+  /// the diagnostic value there was in repeating it.
+  static void _logUnhandled(Object? type) {
+    final name = type?.toString() ?? '<untyped>';
+    if (!_unhandledTypes.add(name)) return;
+    logger.i('Skipped update of type: $name');
   }
 
   // ---------------------------------------------------------------------------
@@ -1061,16 +1308,21 @@ class TDLibClient {
   /// payload, so a caller can treat failure as "nothing came back" instead of
   /// having to catch.
   static Future<Map<String, dynamic>?> _request(
-    Map<String, dynamic> request,
-  ) async {
+    Map<String, dynamic> request, {
+    int? accountId,
+  }) async {
+    // Named in every log line below: with one client per account, an error
+    // without the account it came from cannot be acted on.
+    final target = accountId ?? activeAccountId;
     final dynamic result;
     try {
       result = await _channel.invokeMethod(
         'send',
-        {'json': jsonEncode(request)},
+        _sendArgs(jsonEncode(request), accountId),
       );
     } catch (e) {
-      logger.e('TDLib ${request['@type']} failed', error: e);
+      logger.e('TDLib ${request['@type']} failed on account $target',
+          error: e);
       return null;
     }
 
@@ -1079,7 +1331,9 @@ class TDLibClient {
     if (data == null) {
       final message = result['message'];
       if (message != null) {
-        logger.w('TDLib ${request['@type']} error: $message');
+        logger.w(
+          'TDLib ${request['@type']} error on account $target: $message',
+        );
       }
       return null;
     }
@@ -1091,8 +1345,11 @@ class TDLibClient {
 
   /// Sends [request] and discards the result, for calls whose effect is only
   /// observed through updates.
-  static Future<void> _execute(Map<String, dynamic> request) async {
-    await _request(request);
+  static Future<void> _execute(
+    Map<String, dynamic> request, {
+    int? accountId,
+  }) async {
+    await _request(request, accountId: accountId);
   }
 
   /// Reads a list of ids out of a TDLib `chats`/`users` style response.
@@ -1480,16 +1737,23 @@ class TDLibClient {
   ///
   /// Mirrors [loadChats] but for the archive, returning the response `@type`
   /// ("Ok" while more chats remain, "Error" once the list is exhausted).
-  static Future<String?> loadArchivedChats({int limit = 20}) async {
+  static Future<String?> loadArchivedChats({
+    int limit = 20,
+    int? accountId,
+  }) async {
     final dynamic result;
     try {
-      result = await _channel.invokeMethod('send', {
-        'json': jsonEncode({
-          "@type": "loadChats",
-          "chatList": _chatListOf(archived: true),
-          "limit": limit,
-        }),
-      });
+      result = await _channel.invokeMethod(
+        'send',
+        _sendArgs(
+          jsonEncode({
+            "@type": "loadChats",
+            "chatList": _chatListOf(archived: true),
+            "limit": limit,
+          }),
+          accountId,
+        ),
+      );
     } catch (_) {
       return null;
     }
@@ -1498,12 +1762,18 @@ class TDLibClient {
   }
 
   /// Returns the ids of the chats TDLib currently holds in the archive.
-  static Future<List<int>> getArchivedChats({int limit = 200}) async {
-    final data = await _request({
-      "@type": "getChats",
-      "chatList": _chatListOf(archived: true),
-      "limit": limit,
-    });
+  static Future<List<int>> getArchivedChats({
+    int limit = 200,
+    int? accountId,
+  }) async {
+    final data = await _request(
+      {
+        "@type": "getChats",
+        "chatList": _chatListOf(archived: true),
+        "limit": limit,
+      },
+      accountId: accountId,
+    );
     return _idList(data, 'chatIds');
   }
 
@@ -1734,11 +2004,15 @@ class TDLibClient {
   /// `...ChannelChats`.
   static Future<Map<String, dynamic>?> getScopeNotificationSettings({
     required String scope,
+    int? accountId,
   }) =>
-      _request({
-        "@type": "getScopeNotificationSettings",
-        "scope": {"@type": scope},
-      });
+      _request(
+        {
+          "@type": "getScopeNotificationSettings",
+          "scope": {"@type": scope},
+        },
+        accountId: accountId,
+      );
 
   /// Mutes or unmutes a whole scope of chats by default.
   static Future<void> setScopeNotificationSettings({
@@ -2106,4 +2380,294 @@ class TDLibClient {
         "setRecoveryEmailAddress": newRecoveryEmailAddress.isNotEmpty,
         "newRecoveryEmailAddress": newRecoveryEmailAddress,
       });
+
+  // ---------------------------------------------------------------------------
+  // Proxies
+  // ---------------------------------------------------------------------------
+
+  /// Every proxy the account has stored, the enabled one included.
+  static Future<List<Map<String, dynamic>>> getProxies() async =>
+      _mapList(await _request({"@type": "getProxies"}), 'proxies');
+
+  /// Adds a proxy and returns it with the id TDLib assigned.
+  ///
+  /// [type] must come from [socks5Proxy], [httpProxy] or [mtprotoProxy].
+  static Future<Map<String, dynamic>?> addProxy({
+    required String server,
+    required int port,
+    required Map<String, dynamic> type,
+    bool enable = true,
+  }) =>
+      _request({
+        "@type": "addProxy",
+        "server": server,
+        "port": port,
+        "enable": enable,
+        "type": type,
+      });
+
+  /// Replaces the settings of the proxy with [proxyId].
+  static Future<Map<String, dynamic>?> editProxy({
+    required int proxyId,
+    required String server,
+    required int port,
+    required Map<String, dynamic> type,
+    bool enable = true,
+  }) =>
+      _request({
+        "@type": "editProxy",
+        "proxyId": proxyId,
+        "server": server,
+        "port": port,
+        "enable": enable,
+        "type": type,
+      });
+
+  /// Routes all traffic through the proxy with [proxyId].
+  static Future<void> enableProxy(int proxyId) =>
+      _execute({"@type": "enableProxy", "proxyId": proxyId});
+
+  /// Goes back to a direct connection without forgetting any proxy.
+  static Future<void> disableProxy() => _execute({"@type": "disableProxy"});
+
+  /// Forgets the proxy with [proxyId].
+  static Future<void> removeProxy(int proxyId) =>
+      _execute({"@type": "removeProxy", "proxyId": proxyId});
+
+  /// Measures the round trip to the proxy with [proxyId], in seconds.
+  ///
+  /// Returns null when the proxy could not be reached, which is the only way
+  /// to tell a working proxy from a dead one before switching to it.
+  static Future<double?> pingProxy(int proxyId) async {
+    final result = await _request({"@type": "pingProxy", "proxyId": proxyId});
+    return (result?['seconds'] as num?)?.toDouble();
+  }
+
+  /// A SOCKS5 proxy type, with optional credentials.
+  static Map<String, dynamic> socks5Proxy({
+    String username = '',
+    String password = '',
+  }) => {
+    "@type": "proxyTypeSocks5",
+    "username": username,
+    "password": password,
+  };
+
+  /// An HTTP proxy type.
+  ///
+  /// `httpOnly` stays false: an HTTP-only proxy can serve web requests but
+  /// not the MTProto stream TDLib needs.
+  static Map<String, dynamic> httpProxy({
+    String username = '',
+    String password = '',
+  }) => {
+    "@type": "proxyTypeHttp",
+    "username": username,
+    "password": password,
+    "httpOnly": false,
+  };
+
+  /// An MTProto proxy type, identified by the secret from a `t.me/proxy` link.
+  static Map<String, dynamic> mtprotoProxy(String secret) => {
+    "@type": "proxyTypeMtproto",
+    "secret": secret,
+  };
+
+  // ---------------------------------------------------------------------------
+  // Automatic media download
+  // ---------------------------------------------------------------------------
+
+  /// Tells TDLib which connection is in use, as a `networkType*` name.
+  ///
+  /// TDLib uses this for its own bookkeeping and for the per-network limits
+  /// it syncs across clients; it does not detect the network itself.
+  static Future<void> setNetworkType(
+    String networkType, {
+    int? accountId,
+  }) =>
+      _execute(
+        {
+          "@type": "setNetworkType",
+          "type": {"@type": networkType},
+        },
+        accountId: accountId,
+      );
+
+  /// The low, medium and high presets TDLib recommends for this network.
+  static Future<Map<String, dynamic>?> getAutoDownloadSettingsPresets() =>
+      _request({"@type": "getAutoDownloadSettingsPresets"});
+
+  /// Stores [settings] as the automatic download rules for [networkType].
+  ///
+  /// [networkType] is a `networkType*` type name, such as `networkTypeWiFi`.
+  static Future<void> setAutoDownloadSettings({
+    required Map<String, dynamic> settings,
+    required String networkType,
+  }) => _execute({
+    "@type": "setAutoDownloadSettings",
+    "settings": settings,
+    "type": {"@type": networkType},
+  });
+
+  // ---------------------------------------------------------------------------
+  // Message extras
+  // ---------------------------------------------------------------------------
+
+  /// Sets the self-destruct timer for [chatId], in seconds.
+  ///
+  /// Zero turns it off. Telegram only offers a day, a week and a month, but
+  /// TDLib accepts any value.
+  static Future<void> setChatMessageAutoDeleteTime({
+    required int chatId,
+    required int autoDeleteTime,
+  }) => _execute({
+    "@type": "setChatMessageAutoDeleteTime",
+    "chatId": chatId,
+    "messageAutoDeleteTime": autoDeleteTime,
+  });
+
+  /// Translates a message's text into [toLanguageCode].
+  ///
+  /// Returns a `formattedText`, so formatting inside the message survives.
+  static Future<Map<String, dynamic>?> translateMessageText({
+    required int chatId,
+    required int messageId,
+    required String toLanguageCode,
+  }) => _request({
+    "@type": "translateMessageText",
+    "chatId": chatId,
+    "messageId": messageId,
+    "toLanguageCode": toLanguageCode,
+  });
+
+  /// Who reacted to a message, newest first.
+  ///
+  /// Pass [reactionType] to list one reaction only; omit it for all of them.
+  /// [offset] comes from a previous response's `nextOffset`.
+  static Future<Map<String, dynamic>?> getMessageAddedReactions({
+    required int chatId,
+    required int messageId,
+    Map<String, dynamic>? reactionType,
+    String offset = '',
+    int limit = 50,
+  }) => _request({
+    "@type": "getMessageAddedReactions",
+    "chatId": chatId,
+    "messageId": messageId,
+    if (reactionType != null) "reactionType": reactionType,
+    "offset": offset,
+    "limit": limit,
+  });
+
+  /// Who has read a message in a small group.
+  ///
+  /// TDLib only answers for groups below a server-side member limit and for
+  /// messages younger than a week; anywhere else the list comes back empty.
+  static Future<List<Map<String, dynamic>>> getMessageViewers({
+    required int chatId,
+    required int messageId,
+  }) async => _mapList(
+    await _request({
+      "@type": "getMessageViewers",
+      "chatId": chatId,
+      "messageId": messageId,
+    }),
+    'viewers',
+  );
+
+  // ---------------------------------------------------------------------------
+  // Bots
+  // ---------------------------------------------------------------------------
+
+  /// The `botInfo` of [userId], or null when the user is not a bot.
+  ///
+  /// Both the advertised commands and the menu button live here, so one call
+  /// covers the whole composer bot affordance.
+  static Future<Map<String, dynamic>?> getBotInfo(int userId) async {
+    final info = await getUserFullInfo(userId: userId);
+    final botInfo = info?['botInfo'];
+    if (botInfo is! Map) return null;
+    return Map<String, dynamic>.from(botInfo);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Localization
+  // ---------------------------------------------------------------------------
+
+  /// Every language pack the server offers, official and custom.
+  static Future<List<Map<String, dynamic>>> getLocalizationTargetInfo({
+    bool onlyLocal = false,
+  }) async => _mapList(
+    await _request({
+      "@type": "getLocalizationTargetInfo",
+      "onlyLocal": onlyLocal,
+    }),
+    'languagePacks',
+  );
+
+  /// Strings of [languagePackId] in the current localization target.
+  ///
+  /// An empty [keys] asks for the whole pack. Each entry is `{key, value}`,
+  /// where the value is an ordinary, pluralized or deleted string.
+  static Future<List<Map<String, dynamic>>> getLanguagePackStrings({
+    required String languagePackId,
+    List<String> keys = const [],
+  }) async =>
+      _mapList(
+        await _request({
+          "@type": "getLanguagePackStrings",
+          "languagePackId": languagePackId,
+          "keys": keys,
+        }),
+        'strings',
+      );
+
+  /// Reads a TDLib option whose value is a string.
+  ///
+  /// Needs its own reader: the bridge answers `optionValueString` with a
+  /// `{@type, value}` map rather than the usual `data` payload, so the generic
+  /// request helper would see no result at all.
+  static Future<String?> getStringOption(String name) async {
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode({"@type": "getOption", "name": name}), null),
+    );
+    if (result is! Map) return null;
+    return result['value'] as String?;
+  }
+
+  /// Switches TDLib's own strings to [languagePackId].
+  ///
+  /// This only affects text TDLib generates — service messages and error
+  /// strings; the app's own labels come from its bundled translations.
+  static Future<void> setLanguagePackId(String languagePackId) async {
+    await _execute({
+      "@type": "setOption",
+      "name": "language_pack_id",
+      "value": {"@type": "optionValueString", "value": languagePackId},
+    });
+    await _execute({
+      "@type": "synchronizeLanguagePack",
+      "languagePackId": languagePackId,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Registration
+  // ---------------------------------------------------------------------------
+
+  /// Finishes signing up a phone number that has no Telegram account yet.
+  ///
+  /// Only valid while the authorization state is
+  /// `AuthorizationStateWaitRegistration`.
+  static Future<void> registerUser({
+    required String firstName,
+    required String lastName,
+    bool disableNotification = false,
+  }) => _execute({
+    "@type": "registerUser",
+    "firstName": firstName,
+    "lastName": lastName,
+    "disableNotification": disableNotification,
+  });
 }

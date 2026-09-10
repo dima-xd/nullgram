@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nullgram/pages/chat/utils/voice_recorder.dart';
+import 'package:nullgram/pages/chat/widgets/bot_commands_sheet.dart';
 import 'package:nullgram/pages/chat/widgets/emoji_panel.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/theme/motion.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// The message composer: text field, attachments, emoji panel and the
 /// hold-to-record voice button.
@@ -24,6 +26,8 @@ class ChatComposer extends StatefulWidget {
     required this.onAttach,
     required this.onFormat,
     required this.onInsertLink,
+    this.botCommands = const [],
+    this.onBotCommand,
   });
 
   final TextEditingController controller;
@@ -57,6 +61,13 @@ class ChatComposer extends StatefulWidget {
 
   /// Prompts for a URL and wraps the selection in a markdown link.
   final VoidCallback onInsertLink;
+
+  /// The `botCommand` objects the chat's bots advertise, empty when there are
+  /// none. Drives the slash button, which is hidden while this is empty.
+  final List<Map<String, dynamic>> botCommands;
+
+  /// Called with a chosen command, slash included.
+  final ValueChanged<String>? onBotCommand;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -160,7 +171,7 @@ class _ChatComposerState extends State<ChatComposer> {
     if (!await _recorder.hasPermission()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission required')),
+          SnackBar(content: Text(context.l10n.microphonePermissionRequired)),
         );
       }
       return;
@@ -247,9 +258,34 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  /// Offers the bot's commands and writes the chosen one into the field.
+  ///
+  /// The command is inserted rather than sent, because plenty of them take an
+  /// argument and sending straight away would make those unusable.
+  Future<void> _pickBotCommand() async {
+    final command = await showBotCommandsSheet(
+      context,
+      commands: widget.botCommands,
+    );
+    if (command == null) return;
+
+    widget.controller.text = command.endsWith(' ') ? command : '$command ';
+    widget.controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: widget.controller.text.length),
+    );
+    widget.focusNode.requestFocus();
+    widget.onBotCommand?.call(command);
+  }
+
   Widget _buildComposerRow() {
     return Row(
       children: [
+        if (widget.botCommands.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.smart_toy_outlined),
+            tooltip: context.l10n.botCommands,
+            onPressed: _pickBotCommand,
+          ),
         ValueListenableBuilder<bool>(
           valueListenable: _showEmoji,
           builder: (context, show, child) => IconButton(
@@ -277,8 +313,8 @@ class _ChatComposerState extends State<ChatComposer> {
                     minLines: 1,
                     textCapitalization: TextCapitalization.sentences,
                     contextMenuBuilder: _contextMenu,
-                    decoration: const InputDecoration(
-                      hintText: 'Write a message...',
+                    decoration: InputDecoration(
+                      hintText: context.l10n.writeAMessage,
                       border: InputBorder.none,
                       isDense: true,
                       contentPadding: EdgeInsets.zero,
@@ -316,7 +352,7 @@ class _ChatComposerState extends State<ChatComposer> {
                       onLongPress: widget.onSendOptions,
                       child: IconButton.filled(
                         onPressed: widget.onSend,
-                        tooltip: 'Send (hold for options)',
+                        tooltip: context.l10n.sendHoldForOptions,
                         icon: const Icon(Icons.send),
                       ),
                     )
@@ -333,8 +369,8 @@ class _ChatComposerState extends State<ChatComposer> {
     return GestureDetector(
       key: const ValueKey('record'),
       onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Hold to record a voice message'),
+        SnackBar(
+          content: Text(context.l10n.holdToRecord),
           duration: Duration(seconds: 2),
         ),
       ),
@@ -420,7 +456,7 @@ class _ChatComposerState extends State<ChatComposer> {
         if (editing != null) {
           return _PendingPreview(
             icon: Icons.edit,
-            label: 'Edit message',
+            label: context.l10n.editMessage,
             preview: messagePreviewText(editing),
             onClose: () {
               widget.editing.value = null;
@@ -434,7 +470,7 @@ class _ChatComposerState extends State<ChatComposer> {
             if (replyTo == null) return const SizedBox.shrink();
             return _PendingPreview(
               icon: Icons.reply,
-              label: 'Reply',
+              label: context.l10n.reply,
               preview: messagePreviewText(replyTo),
               onClose: () => widget.replyTo.value = null,
             );

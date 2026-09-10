@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:nullgram/services/avatar_cache.dart';
 import 'package:nullgram/services/custom_emoji_cache.dart';
 import 'package:nullgram/tdlib/constants.dart';
@@ -49,6 +50,38 @@ class ChatStore extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>>? _chatSubscription;
   StreamSubscription<Map<String, dynamic>>? _fileSubscription;
 
+  /// The lists returned by [visibleChats], kept until the next mutation.
+  final Map<String, List<Map<String, dynamic>>> _visible = {};
+
+  /// The counts returned by [unreadChatCount], kept until the next mutation.
+  final Map<String, int> _unreadCounts = {};
+
+  bool? _hasArchived;
+  bool _notifyScheduled = false;
+
+  /// Whether the chats on screen came back from a snapshot and still have to
+  /// be checked against TDLib once the lists are loaded.
+  bool _restoredFromSnapshot = false;
+
+  /// Identifies which run of the store async work belongs to.
+  ///
+  /// A sync is a long chain of awaits and an account switch can land in the
+  /// middle of it. Every step therefore checks that the generation it started
+  /// in is still current: without that, chats fetched for the account being
+  /// left are written into the store that now belongs to the account on
+  /// screen, which is exactly how one account's chats turn up in another's
+  /// list.
+  int _generation = 0;
+
+  /// The account whose chats the store currently describes.
+  int _account = TDLibClient.defaultAccountId;
+
+  /// Account pairs already reported by [_isForeign].
+  final Set<String> _reportedLeaks = {};
+
+  /// Chats put aside while another account is on screen, keyed by account.
+  final Map<int, _AccountSnapshot> _snapshots = {};
+
   /// Every known chat, keyed by id.
   Map<int, Map<String, dynamic>> get chats => _chats;
 
@@ -57,6 +90,29 @@ class ChatStore extends ChangeNotifier {
 
   /// Whether the first full sync is still running.
   bool get isLoading => _isLoading;
+
+  /// Drops the derived caches and asks for one notification.
+  ///
+  /// TDLib delivers updates one platform message at a time — thousands of
+  /// them during a first sync — and every listener answers by recomputing a
+  /// sorted list from the whole store. Collapsing a burst into a single
+  /// notification per frame is what keeps that sync from starving the UI
+  /// thread, and costs nothing: no listener can paint more often than that.
+  void _notify() {
+    _visible.clear();
+    _unreadCounts.clear();
+    _hasArchived = null;
+
+    if (_notifyScheduled) return;
+    _notifyScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _notifyScheduled = false;
+      notifyListeners();
+    });
+    // A post-frame callback only runs if a frame is coming, and an update that
+    // arrives while the app is idle would otherwise sit unnoticed.
+    SchedulerBinding.instance.ensureVisualUpdate();
+  }
 
   /// Starts folding updates into the store and kicks off the initial sync.
   /// Safe to call more than once; later calls are ignored.
@@ -67,49 +123,115 @@ class ChatStore extends ChangeNotifier {
     _chatSubscription = TDLibClient.chatUpdates.listen(_onChatUpdate);
     _fileSubscription = TDLibClient.filesUpdates.listen(_onFileUpdate);
 
-    await _syncLoadedChats();
-    await _loadAll();
+    // Both are pinned for the whole sync: every request names the account it
+    // is for, rather than whichever one is active by the time it is sent, and
+    // every result is dropped if the store has moved on since.
+    final account = TDLibClient.activeAccountId;
+    final generation = _generation;
+    _account = account;
+
+    _restoreSnapshot(account);
+    await _syncLoadedChats(account, generation);
+    if (generation != _generation) return;
+
+    await _loadAll(account, generation);
+    if (generation != _generation) return;
+
+    if (_restoredFromSnapshot) await _pruneStaleChats(account, generation);
+  }
+
+  /// Drops chats that came back from a snapshot but are no longer in a list.
+  ///
+  /// While an account waits in the background its updates never reach this
+  /// store, so a chat it left, deleted or archived meanwhile would otherwise
+  /// stay on screen until the app restarts. Both lists are fully loaded by the
+  /// time this runs, which is what makes "TDLib did not name it" mean "gone"
+  /// rather than "not loaded yet".
+  Future<void> _pruneStaleChats(int account, int generation) async {
+    final confirmed = {
+      ...await TDLibClient.getChats(
+        limit: _confirmLimit,
+        accountId: account,
+      ),
+      ...await TDLibClient.getArchivedChats(
+        limit: _confirmLimit,
+        accountId: account,
+      ),
+    };
+    if (generation != _generation) return;
+    // An empty answer is far more likely to be a failed request than an
+    // account with no chats at all, and acting on it would empty the list.
+    if (confirmed.isEmpty) return;
+
+    final before = _chats.length;
+    _chats.removeWhere((chatId, _) => !confirmed.contains(chatId));
+    if (_chats.length != before) _notify();
   }
 
   /// Pulls the chats TDLib already holds and merges them in.
   ///
   /// On a Dart hot restart the native session survives but will not re-push
   /// `updateNewChat`, so without this the list would come up empty.
-  Future<void> _syncLoadedChats() async {
+  Future<void> _syncLoadedChats(int account, int generation) async {
     final chatIds = [
-      ...await TDLibClient.getChats(),
-      ...await TDLibClient.getArchivedChats(),
+      ...await TDLibClient.getChats(accountId: account),
+      ...await TDLibClient.getArchivedChats(accountId: account),
     ];
-    // Resolved concurrently: each `getChat` is a platform-channel round trip,
-    // and doing hundreds of them in sequence visibly delays the first paint.
-    final chats = await Future.wait(
-      chatIds.map((chatId) => TDLibClient.getChat(chatId: chatId)),
-    );
+    if (generation != _generation) return;
 
-    for (final chat in chats) {
-      if (chat == null) continue;
-      _maybeDownloadPhoto(chat);
-      _maybeResolveAlbum(chat);
-      _chats[chat['id'] as int] = chat;
+    // Each `getChat` is a platform-channel round trip, and TDLib hands the ids
+    // back in list order, so the chats are resolved in batches: a batch is
+    // painted as soon as it lands, which puts the top of the list on screen
+    // while the tail is still arriving. Resolving all of them before the first
+    // paint is what made a switch between accounts feel stuck.
+    for (var start = 0; start < chatIds.length; start += _syncBatchSize) {
+      final batch = chatIds.skip(start).take(_syncBatchSize);
+      final chats = await Future.wait(
+        batch.map(
+          (chatId) => TDLibClient.getChat(chatId: chatId, accountId: account),
+        ),
+      );
+      if (generation != _generation) return;
+
+      for (final chat in chats) {
+        if (chat == null) continue;
+        _maybeDownloadPhoto(chat, accountId: account);
+        _maybeResolveAlbum(chat);
+        _chats[chat['id'] as int] = chat;
+      }
+      _notify();
     }
-    notifyListeners();
   }
 
   /// Walks TDLib's paged chat lists until both are exhausted.
-  Future<void> _loadAll() async {
+  ///
+  /// Each call answers "Ok" while chats remain and an error once the list ends,
+  /// so the pages follow each other immediately: TDLib serializes them itself,
+  /// and waiting between them only kept the list incomplete for longer.
+  Future<void> _loadAll(int account, int generation) async {
     try {
-      while (await TDLibClient.loadChats() == "Ok") {
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-      }
-      while (await TDLibClient.loadArchivedChats() == "Ok") {
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-      }
+      while (await _loadPage(account) && generation == _generation) {}
+      while (await _loadPage(account, archived: true) &&
+          generation == _generation) {}
     } catch (e) {
       logger.e('Failed to load chats: $e');
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (generation == _generation) {
+        _isLoading = false;
+        _notify();
+      }
     }
+  }
+
+  /// Asks for one more page of a list, reporting whether chats remain.
+  Future<bool> _loadPage(int account, {bool archived = false}) async {
+    final answer = archived
+        ? await TDLibClient.loadArchivedChats(
+            limit: _pageSize,
+            accountId: account,
+          )
+        : await TDLibClient.loadChats(limit: _pageSize, accountId: account);
+    return answer == "Ok";
   }
 
   /// Albums resolved for a chat-list preview, keyed by their album id.
@@ -138,7 +260,8 @@ class ChatStore extends ChangeNotifier {
     // a new album doesn't start the same fetch several times over.
     _albums[albumId] = const [];
 
-    _albums[albumId] = await collectAlbumMembers(
+    final generation = _generation;
+    final members = await collectAlbumMembers(
       lastMessage: lastMessage,
       albumId: albumId,
       fetchOlder: (fromMessageId) async {
@@ -152,7 +275,12 @@ class ChatStore extends ChangeNotifier {
         return history?.messages ?? const [];
       },
     );
-    notifyListeners();
+    // The chats this album belonged to may have been put aside for another
+    // account while the history was being paged.
+    if (generation != _generation) return;
+
+    _albums[albumId] = members;
+    _notify();
   }
 
   /// Starts resolving [chat]'s album preview when it has one.
@@ -172,17 +300,18 @@ class ChatStore extends ChangeNotifier {
     final existing = _chats[chatId];
     if (existing == null) return;
     _chats[chatId] = patch(existing);
-    notifyListeners();
+    _notify();
   }
 
   void _onChatUpdate(Map<String, dynamic> update) {
+    if (_isForeign(update)) return;
     switch (update['@type']) {
       case updateNewChatConst:
         final chat = Map<String, dynamic>.from(update['chat'] as Map);
         _maybeDownloadPhoto(chat);
         _maybeResolveAlbum(chat);
         _chats[chat['id'] as int] = chat;
-        notifyListeners();
+        _notify();
 
       case updateChatFoldersConst:
         final raw = update['chatFolders'] as List? ?? const [];
@@ -195,7 +324,7 @@ class ChatStore extends ChangeNotifier {
               'title': folder['name']?['text']?['text'] ?? 'Folder',
             },
         ];
-        notifyListeners();
+        _notify();
 
       case updateChatPositionConst:
         final position = update['position'] as Map<String, dynamic>?;
@@ -295,22 +424,40 @@ class ChatStore extends ChangeNotifier {
       case updateUserConst:
         final user = Map<String, dynamic>.from(update['user'] as Map);
         _users[user['id'] as int] = user;
-        notifyListeners();
+        _notify();
 
       case updateUserStatusConst:
         final userId = update['userId'] as int;
         final user = _users[userId];
         if (user == null) return;
         _users[userId] = {...user, 'status': update['status']};
-        notifyListeners();
+        _notify();
     }
+  }
+
+  /// Whether an update belongs to an account other than the one on screen.
+  ///
+  /// The stream this store listens to is already filtered by account, so this
+  /// should never fire — which is the point. Folding in a foreign update mixes
+  /// two accounts' chats, and that is the one way this store can fail that
+  /// stays invisible until it is thoroughly wrong.
+  bool _isForeign(Map<String, dynamic> update) {
+    final accountId = update['@accountId'] as int?;
+    if (accountId == null || accountId == _account) return false;
+    // Reported once per pair of accounts: a leak arrives as a burst of
+    // hundreds of updates, and a log line each buries everything else.
+    if (_reportedLeaks.add('$accountId>$_account')) {
+      logger.w('Dropped an update of account $accountId in the store '
+          'of account $_account');
+    }
+    return true;
   }
 
   /// Patches a freshly downloaded avatar file back into the chat that
   /// references it. Without this a chat keeps its empty initial path and the
   /// avatar only appears after a restart.
   void _onFileUpdate(Map<String, dynamic> update) {
-    if (update['@type'] != updateFileConst) return;
+    if (_isForeign(update) || update['@type'] != updateFileConst) return;
     final file = update['file'] as Map<String, dynamic>?;
     final fileId = file?['id'] as int?;
     if (fileId == null || file?['local']?['isDownloadingCompleted'] != true) {
@@ -330,14 +477,22 @@ class ChatStore extends ChangeNotifier {
         changed = true;
       }
     }
-    if (changed) notifyListeners();
+    if (changed) _notify();
   }
 
-  void _maybeDownloadPhoto(Map<String, dynamic> chat) {
+  /// Starts fetching a chat's avatar, if it has one that is not on disk yet.
+  ///
+  /// [accountId] is named during a sync: a file id belongs to the client that
+  /// issued it, so sending it to whichever client is active by the time the
+  /// request goes out would fetch an unrelated file.
+  void _maybeDownloadPhoto(Map<String, dynamic> chat, {int? accountId}) {
     final small = chat['photo']?['small'];
     if (small is! Map) return;
     if (small['local']?['path'] != "" || small['remote']?['id'] == null) return;
-    TDLibClient.downloadFile(fileId: small['id'] as int).catchError((_) {});
+    TDLibClient.downloadFile(
+      fileId: small['id'] as int,
+      accountId: accountId,
+    ).catchError((_) {});
   }
 
   List<Map<String, dynamic>> _positionsOf(Map<String, dynamic> chat) => [
@@ -405,7 +560,20 @@ class ChatStore extends ChangeNotifier {
 
   /// The chats of one list, ordered the way Telegram orders them: pinned chats
   /// first (by their pin order), then the rest by TDLib's position order.
+  ///
+  /// Memoized until the next mutation: every chat-list view asks for its own
+  /// list on every rebuild, and each answer means filtering, sorting and
+  /// copying the whole store.
   List<Map<String, dynamic>> visibleChats({
+    required ChatListKind kind,
+    int? folderId,
+  }) =>
+      _visible.putIfAbsent(
+        '${kind.name}:$folderId',
+        () => _computeVisibleChats(kind: kind, folderId: folderId),
+      );
+
+  List<Map<String, dynamic>> _computeVisibleChats({
     required ChatListKind kind,
     int? folderId,
   }) {
@@ -484,7 +652,13 @@ class ChatStore extends ChangeNotifier {
 
   /// The number of chats with something unread in [kind], optionally scoped to
   /// a folder. Muted chats still count, matching Telegram's tab badges.
-  int unreadChatCount({required ChatListKind kind, int? folderId}) {
+  int unreadChatCount({required ChatListKind kind, int? folderId}) =>
+      _unreadCounts.putIfAbsent(
+        '${kind.name}:$folderId',
+        () => _computeUnreadChatCount(kind: kind, folderId: folderId),
+      );
+
+  int _computeUnreadChatCount({required ChatListKind kind, int? folderId}) {
     var count = 0;
     for (final chat in _chats.values) {
       if (positionIn(chat, kind, folderId: folderId) == null) continue;
@@ -495,7 +669,7 @@ class ChatStore extends ChangeNotifier {
   }
 
   /// Whether any chat currently sits in the archive.
-  bool get hasArchivedChats => _chats.values
+  bool get hasArchivedChats => _hasArchived ??= _chats.values
       .any((chat) => positionIn(chat, ChatListKind.archive) != null);
 
   /// Empties the store and stops folding updates.
@@ -503,6 +677,67 @@ class ChatStore extends ChangeNotifier {
   /// Called on sign-out: the store is a singleton that outlives the session, so
   /// without this the next account would briefly see the previous one's chats.
   void reset() {
+    _snapshots.remove(TDLibClient.activeAccountId);
+    _clear();
+    AvatarCache.clear();
+    CustomEmojiCache.clear();
+    _notify();
+  }
+
+  /// Puts the current chats aside under [accountId] and empties the store.
+  ///
+  /// Used when switching accounts. The account being left behind keeps its
+  /// client online, but its updates stop reaching this store, so its chats are
+  /// kept as they were and handed straight back when it returns to the screen
+  /// — a switch then paints immediately and re-syncs behind the list, instead
+  /// of showing a skeleton while a few hundred chats are fetched again.
+  ///
+  /// The avatar and emoji caches are keyed by file path, and every account has
+  /// its own directory, so they are deliberately left warm.
+  void stash(int accountId) {
+    _snapshots[accountId] = _AccountSnapshot(
+      chats: Map.of(_chats),
+      users: Map.of(_users),
+      supergroups: Map.of(_supergroups),
+      folders: _folders,
+      albums: Map.of(_albums),
+    );
+    _clear();
+    _notify();
+  }
+
+  /// Hands the screen from one account to another in a single step.
+  ///
+  /// Stashing and restoring together means the new account's chats are in
+  /// place before the frame that drops the old ones is drawn, so a switch
+  /// never flashes the loading skeleton at an account whose chats are known.
+  void swap({required int from, required int to}) {
+    stash(from);
+    _restoreSnapshot(to);
+  }
+
+  /// Forgets an account's stashed chats, for one that is being signed out.
+  void forgetSnapshot(int accountId) => _snapshots.remove(accountId);
+
+  /// Brings [accountId]'s stashed chats back, if it has any.
+  void _restoreSnapshot(int accountId) {
+    final snapshot = _snapshots.remove(accountId);
+    if (snapshot == null) return;
+
+    _chats.addAll(snapshot.chats);
+    _users.addAll(snapshot.users);
+    _supergroups.addAll(snapshot.supergroups);
+    _albums.addAll(snapshot.albums);
+    _folders = snapshot.folders;
+    // There is something to show, so the list must not fall back to the
+    // skeleton while the refresh runs.
+    _isLoading = false;
+    _restoredFromSnapshot = true;
+    _notify();
+  }
+
+  /// Drops every chat and stops folding updates, leaving the caches alone.
+  void _clear() {
     _chatSubscription?.cancel();
     _chatSubscription = null;
     _fileSubscription?.cancel();
@@ -512,11 +747,12 @@ class ChatStore extends ChangeNotifier {
     _supergroups.clear();
     _folders = const [];
     _albums.clear();
-    AvatarCache.clear();
-    CustomEmojiCache.clear();
     _isLoading = true;
     _started = false;
-    notifyListeners();
+    _restoredFromSnapshot = false;
+    // Whatever is still in flight for the account being left belongs to the
+    // run that ends here.
+    _generation++;
   }
 
   @override
@@ -525,6 +761,33 @@ class ChatStore extends ChangeNotifier {
     _fileSubscription?.cancel();
     super.dispose();
   }
+}
+
+/// How many chats one initial-sync batch resolves at a time.
+const int _syncBatchSize = 40;
+
+/// How many chats one `loadChats` page asks TDLib for.
+const int _pageSize = 100;
+
+/// The ceiling used when re-reading both lists to confirm restored chats.
+const int _confirmLimit = 10000;
+
+/// One account's chats, kept while another account is on screen.
+@immutable
+class _AccountSnapshot {
+  const _AccountSnapshot({
+    required this.chats,
+    required this.users,
+    required this.supergroups,
+    required this.folders,
+    required this.albums,
+  });
+
+  final Map<int, Map<String, dynamic>> chats;
+  final Map<int, Map<String, dynamic>> users;
+  final Map<int, Map<String, dynamic>> supergroups;
+  final List<Map<String, dynamic>> folders;
+  final Map<int, List<Map<String, dynamic>>> albums;
 }
 
 /// Telegram caps an album at ten items.

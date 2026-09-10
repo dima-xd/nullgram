@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// What the chat's overflow menu asked for.
 enum ChatMenuAction {
@@ -9,6 +10,7 @@ enum ChatMenuAction {
   selectMessages,
   scheduledMessages,
   toggleMute,
+  autoDelete,
   clearHistory,
   toggleBlock,
   deleteChat,
@@ -46,17 +48,17 @@ Future<ChatMenuAction?> showChatMenu({
           ),
           _Item(
             icon: Icons.search,
-            label: 'Search in chat',
+            label: context.l10n.searchInChat,
             action: ChatMenuAction.search,
           ),
           _Item(
             icon: Icons.checklist,
-            label: 'Select messages',
+            label: context.l10n.selectMessages,
             action: ChatMenuAction.selectMessages,
           ),
           _Item(
             icon: Icons.schedule_send_outlined,
-            label: 'Scheduled messages',
+            label: context.l10n.scheduledMessages,
             action: ChatMenuAction.scheduledMessages,
           ),
           _Item(
@@ -64,10 +66,15 @@ Future<ChatMenuAction?> showChatMenu({
             label: muted ? 'Unmute' : 'Mute',
             action: ChatMenuAction.toggleMute,
           ),
+          _Item(
+            icon: Icons.auto_delete_outlined,
+            label: autoDeleteLabel(sheetContext, chat),
+            action: ChatMenuAction.autoDelete,
+          ),
           const Divider(height: 1),
           _Item(
             icon: Icons.cleaning_services_outlined,
-            label: 'Clear history',
+            label: context.l10n.clearHistory,
             action: ChatMenuAction.clearHistory,
             destructive: true,
           ),
@@ -81,14 +88,14 @@ Future<ChatMenuAction?> showChatMenu({
           if (isPrivate)
             _Item(
               icon: Icons.delete_outline,
-              label: 'Delete chat',
+              label: context.l10n.deleteChat,
               action: ChatMenuAction.deleteChat,
               destructive: true,
             )
           else
             _Item(
               icon: Icons.logout,
-              label: 'Leave chat',
+              label: context.l10n.leaveChat,
               action: ChatMenuAction.leaveChat,
               destructive: true,
             ),
@@ -96,6 +103,17 @@ Future<ChatMenuAction?> showChatMenu({
       ),
     ),
   );
+}
+
+/// The menu label for the chat's self-destruct timer, stating the current
+/// setting so the menu itself answers "is this on?".
+String autoDeleteLabel(BuildContext context, Map<String, dynamic> chat) {
+  final seconds = (chat['messageAutoDeleteTime'] as num?)?.toInt() ?? 0;
+  if (seconds <= 0) return context.l10n.autoDeleteOff;
+  if (seconds % 86400 == 0) {
+    return context.l10n.autoDeleteAfterDays(seconds ~/ 86400);
+  }
+  return context.l10n.autoDeleteOn;
 }
 
 class _Item extends StatelessWidget {

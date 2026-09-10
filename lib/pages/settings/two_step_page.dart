@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
+import 'package:nullgram/l10n/l10n.dart';
 
 /// Two-step verification: the password asked for when signing in on a new
 /// device, on top of the SMS code.
@@ -58,8 +59,8 @@ class _TwoStepPageState extends State<TwoStepPage> {
 
     if (updated == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not change the password. Check the old one.'),
+        SnackBar(
+          content: Text(context.l10n.passwordChangeFailed),
         ),
       );
       return;
@@ -95,14 +96,14 @@ class _TwoStepPageState extends State<TwoStepPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Turn off two-step verification?'),
-        content: const Text(
-          'Your account will be protected by the login code alone.',
+        title: Text(context.l10n.turnOffTwoStepQuestion),
+        content: Text(
+          context.l10n.twoStepDisableWarning,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -110,7 +111,7 @@ class _TwoStepPageState extends State<TwoStepPage> {
               foregroundColor: scheme.onError,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Turn off'),
+            child: Text(context.l10n.turnOff),
           ),
         ],
       ),
@@ -123,7 +124,7 @@ class _TwoStepPageState extends State<TwoStepPage> {
     if (!mounted) return;
     if (updated == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('That password was not accepted.')),
+        SnackBar(content: Text(context.l10n.passwordNotAccepted)),
       );
       return;
     }
@@ -133,7 +134,7 @@ class _TwoStepPageState extends State<TwoStepPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Two-step verification')),
+      appBar: AppBar(title: Text(context.l10n.twoStepVerification)),
       body: ValueListenableBuilder<bool>(
         valueListenable: _isLoading,
         builder: (context, isLoading, child) {
@@ -144,11 +145,11 @@ class _TwoStepPageState extends State<TwoStepPage> {
             valueListenable: _state,
             builder: (context, state, child) {
               if (state == null) {
-                return const Center(
+                return Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text(
-                      'Two-step verification is unavailable right now.',
+                      context.l10n.twoStepUnavailable,
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -180,13 +181,13 @@ class _TwoStepPageState extends State<TwoStepPage> {
                     ),
                     title: Text(hasPassword ? 'Password is on' : 'Password is off'),
                     subtitle: hasPassword && hint.isNotEmpty
-                        ? Text('Hint: $hint')
+                        ? Text(context.l10n.hintWithText(hint))
                         : null,
                   ),
                   if (state['hasRecoveryEmailAddress'] == true)
-                    const ListTile(
+                    ListTile(
                       leading: Icon(Icons.mail_outline),
-                      title: Text('Recovery email is set'),
+                      title: Text(context.l10n.recoveryEmailIsSet),
                     ),
                   const Divider(height: 24),
                   Padding(
@@ -207,7 +208,7 @@ class _TwoStepPageState extends State<TwoStepPage> {
                           foregroundColor:
                               Theme.of(context).colorScheme.error,
                         ),
-                        child: const Text('Turn off two-step verification'),
+                        child: Text(context.l10n.turnOffTwoStep),
                       ),
                     ),
                 ],
@@ -284,7 +285,7 @@ class _PasswordSheetState extends State<_PasswordSheet> {
               autofocus: true,
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
-                labelText: 'Current password',
+                labelText: context.l10n.currentPassword,
                 helperText: widget.hint.isEmpty ? null : 'Hint: ${widget.hint}',
                 border: const OutlineInputBorder(),
               ),
@@ -297,17 +298,17 @@ class _PasswordSheetState extends State<_PasswordSheet> {
               obscureText: true,
               autofocus: !widget.requiresOldPassword,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'New password',
-                helperText: 'At least 4 characters',
+              decoration: InputDecoration(
+                labelText: context.l10n.newPassword,
+                helperText: context.l10n.atLeastFourCharacters,
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _hint,
-              decoration: const InputDecoration(
-                labelText: 'Hint (optional)',
+              decoration: InputDecoration(
+                labelText: context.l10n.hintOptional,
                 border: OutlineInputBorder(),
               ),
             ),

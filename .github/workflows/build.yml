@@ -44,13 +44,35 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # Fails here rather than after a full build: a missing secret only shows
+      # up when the app starts and throws over the empty credential.
+      - name: Check Telegram credentials
+        run: |
+          for name in API_ID API_HASH DB_ENCRYPTION_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret $name is not set"
+              exit 1
+            fi
+          done
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
+
       - name: Build signed APK
-        run: flutter build apk --release --split-per-abi
+        run: |
+          flutter build apk --release --split-per-abi \
+            --dart-define=API_ID="$API_ID" \
+            --dart-define=API_HASH="$API_HASH" \
+            --dart-define=DB_ENCRYPTION_KEY="$DB_ENCRYPTION_KEY"
         env:
           ANDROID_KEYSTORE: ${{ github.workspace }}/keystore.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
 
       - name: Archive APKs
         run: |

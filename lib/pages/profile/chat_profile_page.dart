@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 import 'package:nullgram/pages/chat/chat_page.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/profile/edit_chat_page.dart';
@@ -11,6 +10,8 @@ import 'package:nullgram/pages/profile/widgets/profile_info_tile.dart';
 import 'package:nullgram/services/call_service.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
+import 'package:nullgram/l10n/l10n.dart';
+import 'package:nullgram/pages/chat/utils/member_count.dart';
 
 /// A profile screen for a chat: large avatar, title, quick actions and details
 /// such as a user's bio and phone or a group's description and invite link.
@@ -117,17 +118,22 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
     await _loadGroupInfo();
   }
 
-  String? _subtitle(Map<String, dynamic>? user) {
+  String? _subtitle(BuildContext context, Map<String, dynamic>? user) {
     if (user != null) return MessageFormatter.getUserStatus(user);
+
     final supergroup = widget.chat['supergroup'];
     if (supergroup != null) {
       final count = supergroup['memberCount'] as int? ?? 0;
-      final label = supergroup['isChannel'] == true ? 'subscribers' : 'members';
-      return '${NumberFormat('#,###', 'en_US').format(count)} $label';
+      return memberCountLabel(
+        context,
+        count,
+        isChannel: supergroup['isChannel'] == true,
+      );
     }
+
     final members = _groupFullInfo.value?['members'] as List?;
-    if (members != null) return '${members.length} members';
-    return null;
+    if (members == null) return null;
+    return memberCountLabel(context, members.length, isChannel: false);
   }
 
   @override
@@ -157,7 +163,7 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
               ProfileHeaderSliver(
                 chat: chatWithUser,
                 title: title,
-                subtitle: _subtitle(user),
+                subtitle: _subtitle(context, user),
                 actions: [
                   ValueListenableBuilder<bool>(
                     valueListenable: _isMuted,
@@ -170,7 +176,7 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                   if (_canEditChat())
                     IconButton(
                       icon: const Icon(Icons.edit_outlined),
-                      tooltip: 'Edit',
+                      tooltip: context.l10n.edit,
                       onPressed: _openEdit,
                     ),
                 ],
@@ -186,7 +192,7 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                         children: [
                           ListTile(
                             leading: const Icon(Icons.perm_media_outlined),
-                            title: const Text('Shared media'),
+                            title: Text(context.l10n.sharedMedia),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => Navigator.push(
                               context,
@@ -199,7 +205,7 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                           if (user == null)
                             ListTile(
                               leading: const Icon(Icons.group_outlined),
-                              title: const Text('Members'),
+                              title: Text(context.l10n.members),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () => Navigator.push(
                                 context,
@@ -222,14 +228,14 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                             if (phoneValue != null)
                               ProfileInfoTile(
                                 icon: Icons.phone_outlined,
-                                label: 'Phone',
+                                label: context.l10n.phone,
                                 value: phoneValue,
                                 copyable: true,
                               ),
                             if (username != null && username.isNotEmpty)
                               ProfileInfoTile(
                                 icon: Icons.alternate_email,
-                                label: 'Username',
+                                label: context.l10n.username,
                                 value: '@$username',
                                 copyable: true,
                               ),
@@ -249,7 +255,7 @@ class _ChatProfilePageState extends State<ChatProfilePage> {
                         child: Card(
                           child: ProfileInfoTile(
                             icon: Icons.info_outline,
-                            label: 'Bio',
+                            label: context.l10n.bio,
                             value: bio,
                           ),
                         ),
@@ -291,7 +297,7 @@ class _QuickActions extends StatelessWidget {
     if (!context.mounted) return;
     if (chat == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not start a secret chat')),
+        SnackBar(content: Text(context.l10n.secretChatFailed)),
       );
       return;
     }
@@ -314,7 +320,7 @@ class _QuickActions extends StatelessWidget {
                   onPressed: () =>
                       callService.startCall(userId: userId, isVideo: false),
                   icon: const Icon(Icons.call),
-                  label: const Text('Call'),
+                  label: Text(context.l10n.call),
                 ),
               ),
               const SizedBox(width: 12),
@@ -323,7 +329,7 @@ class _QuickActions extends StatelessWidget {
                   onPressed: () =>
                       callService.startCall(userId: userId, isVideo: true),
                   icon: const Icon(Icons.videocam),
-                  label: const Text('Video'),
+                  label: Text(context.l10n.video),
                 ),
               ),
             ],
@@ -334,7 +340,7 @@ class _QuickActions extends StatelessWidget {
             child: FilledButton.tonalIcon(
               onPressed: () => _startSecretChat(context),
               icon: const Icon(Icons.lock_outline),
-              label: const Text('Start secret chat'),
+              label: Text(context.l10n.startSecretChat),
             ),
           ),
         ],
@@ -368,24 +374,24 @@ class _GroupDetails extends StatelessWidget {
             if (description != null && description.isNotEmpty)
               ProfileInfoTile(
                 icon: Icons.info_outline,
-                label: 'About',
+                label: context.l10n.about,
                 value: description,
               ),
             if (inviteLink != null && inviteLink.isNotEmpty)
               ListTile(
                 leading: const Icon(Icons.link),
                 title: Text(inviteLink),
-                subtitle: const Text('Invite link'),
+                subtitle: Text(context.l10n.inviteLink),
                 trailing: IconButton(
                   icon: const Icon(Icons.copy),
-                  tooltip: 'Copy link',
+                  tooltip: context.l10n.copyLink,
                   onPressed: () async {
                     await Clipboard.setData(
                       ClipboardData(text: inviteLink),
                     );
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Invite link copied')),
+                      SnackBar(content: Text(context.l10n.inviteLinkCopied)),
                     );
                   },
                 ),
