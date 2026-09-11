@@ -1433,7 +1433,22 @@ class _ChatPageState extends State<ChatPage> {
       _toast('Calls are available in private chats only');
       return;
     }
-    await callService.startCall(userId: userId, isVideo: false);
+    final started =
+        await callService.startCall(userId: userId, isVideo: false);
+    if (!mounted || started) return;
+    _toast(context.l10n.microphonePermissionRequired);
+  }
+
+  /// Places an outgoing video call to the private chat's peer.
+  Future<void> _startVideoCall() async {
+    final userId = _chatUserId();
+    if (userId == null) {
+      _toast('Calls are available in private chats only');
+      return;
+    }
+    final started = await callService.startCall(userId: userId, isVideo: true);
+    if (!mounted || started) return;
+    _toast(context.l10n.cameraAccessDenied);
   }
 
   void _openProfile() {
@@ -1646,12 +1661,18 @@ class _ChatPageState extends State<ChatPage> {
                 tooltip: context.l10n.searchInChat,
                 onPressed: _openSearch,
               ),
-              if (_chatUserId() != null)
+              if (_chatUserId() != null) ...[
+                IconButton(
+                  icon: const Icon(Icons.videocam),
+                  tooltip: context.l10n.videoCall,
+                  onPressed: _startVideoCall,
+                ),
                 IconButton(
                   icon: const Icon(Icons.call),
                   tooltip: context.l10n.call,
                   onPressed: _startVoiceCall,
                 ),
+              ],
               IconButton(
                 icon: const Icon(Icons.more_vert),
                 tooltip: context.l10n.more,

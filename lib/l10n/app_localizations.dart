@@ -284,6 +284,12 @@ abstract class AppLocalizations {
   /// **'Camera'**
   String get camera;
 
+  /// No description provided for @cameraAccessDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera access denied'**
+  String get cameraAccessDenied;
+
   /// No description provided for @cancel.
   ///
   /// In en, this message translates to:
@@ -602,6 +608,12 @@ abstract class AppLocalizations {
   /// **'First name'**
   String get firstName;
 
+  /// No description provided for @flipCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Flip'**
+  String get flipCamera;
+
   /// No description provided for @forEveryone.
   ///
   /// In en, this message translates to:
@@ -781,6 +793,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Microphone permission required'**
   String get microphonePermissionRequired;
+
+  /// No description provided for @minimize.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimize'**
+  String get minimize;
 
   /// No description provided for @more.
   ///
@@ -1519,6 +1537,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Video'**
   String get video;
+
+  /// No description provided for @videoCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Video call'**
+  String get videoCall;
 
   /// No description provided for @videoMessage.
   ///

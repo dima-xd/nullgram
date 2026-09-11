@@ -104,6 +104,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get camera => 'Camera';
 
   @override
+  String get cameraAccessDenied => 'Camera access denied';
+
+  @override
   String get cancel => 'Cancel';
 
   @override
@@ -265,6 +268,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get firstName => 'First name';
 
   @override
+  String get flipCamera => 'Flip';
+
+  @override
   String get forEveryone => 'For everyone';
 
   @override
@@ -356,6 +362,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get microphonePermissionRequired => 'Microphone permission required';
+
+  @override
+  String get minimize => 'Minimize';
 
   @override
   String get more => 'More';
@@ -735,6 +744,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get video => 'Video';
+
+  @override
+  String get videoCall => 'Video call';
 
   @override
   String get videoMessage => 'Video message';

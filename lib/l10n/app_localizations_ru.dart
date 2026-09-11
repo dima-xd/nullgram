@@ -105,6 +105,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get camera => 'Камера';
 
   @override
+  String get cameraAccessDenied => 'Нет доступа к камере';
+
+  @override
   String get cancel => 'Отмена';
 
   @override
@@ -267,6 +270,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get firstName => 'Имя';
 
   @override
+  String get flipCamera => 'Развернуть';
+
+  @override
   String get forEveryone => 'У всех';
 
   @override
@@ -358,6 +364,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get microphonePermissionRequired => 'Нужен доступ к микрофону';
+
+  @override
+  String get minimize => 'Свернуть';
 
   @override
   String get more => 'Ещё';
@@ -737,6 +746,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get video => 'Видео';
+
+  @override
+  String get videoCall => 'Видеозвонок';
 
   @override
   String get videoMessage => 'Видеосообщение';

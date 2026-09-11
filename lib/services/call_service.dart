@@ -13,8 +13,8 @@ import 'call_state_reducer.dart';
 typedef SendSignaling = Future<void> Function(int callId, Uint8List data);
 
 /// Places an outgoing call via the signaling backend (TDLib `createCall`).
-typedef CreateCall = Future<void> Function(
-    int userId, bool isVideo, List<String> versions);
+typedef CreateCall =
+    Future<void> Function(int userId, bool isVideo, List<String> versions);
 
 /// Accepts an incoming call via the signaling backend (TDLib `acceptCall`).
 typedef AcceptCall = Future<void> Function(int callId, List<String> versions);
@@ -31,11 +31,11 @@ class CallService extends ChangeNotifier {
     CreateCall? createCall,
     AcceptCall? acceptCall,
     DiscardCall? discardCall,
-  })  : _engine = engine,
-        _sendSignaling = sendSignaling,
-        _createCall = createCall ?? ((_, _, _) async {}),
-        _acceptCall = acceptCall ?? ((_, _) async {}),
-        _discardCall = discardCall ?? ((_, _) async {}) {
+  }) : _engine = engine,
+       _sendSignaling = sendSignaling,
+       _createCall = createCall ?? ((_, _, _) async {}),
+       _acceptCall = acceptCall ?? ((_, _) async {}),
+       _discardCall = discardCall ?? ((_, _) async {}) {
     _sub = callUpdates.listen(_onUpdate);
   }
 
@@ -48,7 +48,18 @@ class CallService extends ChangeNotifier {
   late final StreamSubscription<Map<String, dynamic>> _sub;
   StreamSubscription<Uint8List>? _outSub;
   StreamSubscription<TgCallState>? _engineStateSub;
+  StreamSubscription<TgVideoTrack>? _localVideoSub;
+  StreamSubscription<TgVideoTrack>? _remoteVideoSub;
   TgCallSession? _session;
+
+  /// Guards the async gap in [_startEngine]: `_session` is only assigned
+  /// after the engine starts, so the state check alone lets a second
+  /// `CallStateReady` in.
+  bool _startingEngine = false;
+
+  /// Bumped by [_teardown] so a start still in flight across its await can
+  /// tell that its call has already ended.
+  int _generation = 0;
 
   CurrentCall? _current;
   CurrentCall? get current => _current;
@@ -69,22 +80,34 @@ class CallService extends ChangeNotifier {
     final isOutgoing = call['isOutgoing'] as bool? ?? false;
     final isVideo = call['isVideo'] as bool? ?? false;
     final state = call['state'] as Map<String, dynamic>;
-    debugPrint('[call] state=${state['@type']} id=$callId outgoing=$isOutgoing'
-        '${state['@type'] == 'callStateDiscarded' ? ' reason=${state['reason']?['@type']}' : ''}'
-        '${state['@type'] == 'callStateError' ? ' error=${state['error']}' : ''}');
+    debugPrint(
+      '[call] state=${state['@type']} id=$callId outgoing=$isOutgoing'
+      '${state['@type'] == 'callStateDiscarded' ? ' reason=${state['reason']?['@type']}' : ''}'
+      '${state['@type'] == 'callStateError' ? ' error=${state['error']}' : ''}',
+    );
     final uiState = mapTdCallState(state, isOutgoing: isOutgoing);
 
-    _current = (_current ??
-            CurrentCall(
-              callId: callId,
-              userId: call['userId'] as int,
-              isOutgoing: isOutgoing,
-              isVideo: isVideo,
-              uiState: uiState,
-            ))
-        .copyWith(uiState: uiState);
+    final existing = _current?.callId == callId ? _current : null;
+    _current =
+        (existing ??
+                CurrentCall(
+                  callId: callId,
+                  userId: call['userId'] as int,
+                  isOutgoing: isOutgoing,
+                  isVideo: isVideo,
+                  uiState: uiState,
+                ))
+            .copyWith(uiState: uiState);
 
-    if (state['@type'] == 'CallStateReady' && _session == null) {
+    if (uiState == CallUiState.active && _current!.connectedAtMs == null) {
+      _current = _current!.copyWith(
+        connectedAtMs: DateTime.now().millisecondsSinceEpoch,
+      );
+    }
+
+    if (state['@type'] == 'CallStateReady' &&
+        _session == null &&
+        !_startingEngine) {
       _startEngine(callId, isOutgoing, isVideo, state);
     }
     if (uiState.isTerminal) {
@@ -99,30 +122,87 @@ class CallService extends ChangeNotifier {
     bool isVideo,
     Map<String, dynamic> readyState,
   ) async {
-    final config =
-        buildTgCallConfig(readyState, isOutgoing: isOutgoing, isVideo: isVideo);
-    debugPrint('[call] ready -> starting engine: servers=${config.servers.length} '
-        'keyLen=${config.encryptionKey.length} allowP2p=${config.allowP2p}');
-    final session = await _engine.start(config);
-    _session = session;
-    _current = _current?.copyWith(emojis: emojisFromReady(readyState));
-    _outSub =
-        session.outgoingSignaling.listen((data) => _sendSignaling(callId, data));
-    _engineStateSub = session.state.listen((_) => notifyListeners());
+    final generation = _generation;
+    _startingEngine = true;
+    final config = buildTgCallConfig(
+      readyState,
+      isOutgoing: isOutgoing,
+      isVideo: isVideo,
+    );
+    debugPrint(
+      '[call] ready -> starting engine: servers=${config.servers.length} '
+      'keyLen=${config.encryptionKey.length} allowP2p=${config.allowP2p}',
+    );
+    try {
+      final session = await _engine.start(config);
+      if (generation != _generation) {
+        await session.stop();
+        return;
+      }
+      _session = session;
+      _current = _current?.copyWith(
+        emojis: emojisFromReady(readyState),
+        isVideoEnabled: isVideo,
+      );
+      _outSub = session.outgoingSignaling.listen(
+        (data) => _sendSignaling(callId, data),
+      );
+      _engineStateSub = session.state.listen((_) => notifyListeners());
+      _localVideoSub = session.localVideo.listen((track) {
+        _current = _current?.copyWith(localVideo: track);
+        notifyListeners();
+      });
+      _remoteVideoSub = session.remoteVideo.listen((track) {
+        _current = _current?.copyWith(remoteVideo: track);
+        notifyListeners();
+      });
+    } catch (error, stackTrace) {
+      debugPrint('[call] engine start failed: $error');
+      debugPrint('$stackTrace');
+      if (generation == _generation) {
+        _current = _current?.copyWith(errorMessage: '$error');
+      }
+    } finally {
+      _startingEngine = false;
+    }
     notifyListeners();
   }
 
   /// Starts an outgoing call to [userId].
-  Future<void> startCall({required int userId, required bool isVideo}) {
-    debugPrint('[call] startCall user=$userId video=$isVideo '
-        'versions=${_engine.supportedVersions}');
-    return _createCall(userId, isVideo, _engine.supportedVersions);
+  ///
+  /// Media permissions are settled first: TDLib would otherwise create a video
+  /// call this client has no camera access to fill.
+  ///
+  /// Returns false when media permission was denied, true once the request
+  /// has been handed to TDLib.
+  Future<bool> startCall({required int userId, required bool isVideo}) async {
+    final granted = await _engine.ensureMediaPermissions(video: isVideo);
+    if (!granted) {
+      debugPrint('[call] startCall denied: media permissions');
+      return false;
+    }
+    debugPrint(
+      '[call] startCall user=$userId video=$isVideo '
+      'versions=${_engine.supportedVersions}',
+    );
+    await _createCall(userId, isVideo, _engine.supportedVersions);
+    return true;
   }
 
   /// Accepts the current incoming call.
-  Future<void> accept() async {
+  ///
+  /// Returns false when media permission was denied, true once the acceptance
+  /// has been handed to TDLib.
+  Future<bool> accept() async {
     final c = _current;
-    if (c != null) await _acceptCall(c.callId, _engine.supportedVersions);
+    if (c == null) return false;
+    final granted = await _engine.ensureMediaPermissions(video: c.isVideo);
+    if (!granted) {
+      debugPrint('[call] accept denied: media permissions');
+      return false;
+    }
+    await _acceptCall(c.callId, _engine.supportedVersions);
+    return true;
   }
 
   /// Ends or declines the current call.
@@ -137,22 +217,62 @@ class CallService extends ChangeNotifier {
     if (c == null || _session == null) return;
     final next = !c.isMuted;
     await _session!.setMuted(next);
-    _current = c.copyWith(isMuted: next);
+    _current = _current?.copyWith(isMuted: next);
     notifyListeners();
   }
 
-  /// Toggles local video on/off.
-  Future<void> toggleVideo() async {
+  /// Toggles local video on/off, asking for the camera the first time.
+  ///
+  /// [deniedMessage] is surfaced as `errorMessage` when the camera permission
+  /// is refused; the caller owns the wording so it can be localised.
+  Future<void> toggleVideo(String deniedMessage) async {
     final c = _current;
     if (c == null || _session == null) return;
     final next = !c.isVideoEnabled;
+    if (next && !await _engine.ensureMediaPermissions(video: true)) {
+      _current = _current?.copyWith(errorMessage: deniedMessage);
+      notifyListeners();
+      return;
+    }
     await _session!.setVideoEnabled(next);
-    _current = c.copyWith(isVideoEnabled: next);
+    _current = _current?.copyWith(isVideoEnabled: next);
     notifyListeners();
   }
 
   /// Switches between front/back cameras.
-  Future<void> switchCamera() async => _session?.switchCamera();
+  Future<void> switchCamera() async {
+    final c = _current;
+    if (c == null || _session == null) return;
+    await _session!.switchCamera();
+    _current = _current?.copyWith(isFrontCamera: !c.isFrontCamera);
+    notifyListeners();
+  }
+
+  /// Collapses the call to the in-app floating window.
+  void minimize() {
+    final c = _current;
+    if (c == null || c.isMinimized || c.uiState.isTerminal) return;
+    _current = c.copyWith(isMinimized: true);
+    notifyListeners();
+  }
+
+  /// Returns from the floating window to the full call screen.
+  void expand() {
+    if (_current == null || !_current!.isMinimized) return;
+    _current = _current!.copyWith(isMinimized: false);
+    notifyListeners();
+  }
+
+  /// Routes audio to the speaker or the earpiece.
+  Future<void> setSpeaker(bool on) async {
+    final c = _current;
+    if (c == null || _session == null) return;
+    await _session!.setAudioRoute(
+      on ? TgAudioRoute.speaker : TgAudioRoute.earpiece,
+    );
+    _current = _current?.copyWith(isSpeakerOn: on);
+    notifyListeners();
+  }
 
   /// Routes audio to [route].
   Future<void> setAudioRoute(TgAudioRoute route) async =>
@@ -163,8 +283,18 @@ class CallService extends ChangeNotifier {
     _outSub = null;
     _engineStateSub?.cancel();
     _engineStateSub = null;
+    _localVideoSub?.cancel();
+    _localVideoSub = null;
+    _remoteVideoSub?.cancel();
+    _remoteVideoSub = null;
+    _current = _current?.copyWith(
+      localVideo: TgVideoTrack.empty,
+      remoteVideo: TgVideoTrack.empty,
+    );
     _session?.stop();
     _session = null;
+    _startingEngine = false;
+    _generation++;
   }
 
   @override
@@ -188,7 +318,10 @@ CallService buildCallService() {
     sendSignaling: (callId, data) =>
         TDLibClient.sendCallSignalingData(callId: callId, data: data),
     createCall: (userId, isVideo, versions) => TDLibClient.createCall(
-        userId: userId, isVideo: isVideo, protocolVersions: versions),
+      userId: userId,
+      isVideo: isVideo,
+      protocolVersions: versions,
+    ),
     acceptCall: (callId, versions) =>
         TDLibClient.acceptCall(callId: callId, protocolVersions: versions),
     discardCall: (callId, isVideo) =>

@@ -317,8 +317,19 @@ class _QuickActions extends StatelessWidget {
             children: [
               Expanded(
                 child: FilledButton.tonalIcon(
-                  onPressed: () =>
-                      callService.startCall(userId: userId, isVideo: false),
+                  onPressed: () async {
+                    final started = await callService.startCall(
+                      userId: userId,
+                      isVideo: false,
+                    );
+                    if (!context.mounted || started) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content:
+                            Text(context.l10n.microphonePermissionRequired),
+                      ),
+                    );
+                  },
                   icon: const Icon(Icons.call),
                   label: Text(context.l10n.call),
                 ),
@@ -326,8 +337,16 @@ class _QuickActions extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton.tonalIcon(
-                  onPressed: () =>
-                      callService.startCall(userId: userId, isVideo: true),
+                  onPressed: () async {
+                    final started = await callService.startCall(
+                      userId: userId,
+                      isVideo: true,
+                    );
+                    if (!context.mounted || started) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(context.l10n.cameraAccessDenied)),
+                    );
+                  },
                   icon: const Icon(Icons.videocam),
                   label: Text(context.l10n.video),
                 ),

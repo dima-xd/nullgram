@@ -131,8 +131,22 @@ class _CallTile extends StatelessWidget {
           : IconButton(
               icon: Icon(isVideo ? Icons.videocam_outlined : Icons.call),
               tooltip: context.l10n.callBack,
-              onPressed: () =>
-                  callService.startCall(userId: userId, isVideo: isVideo),
+              onPressed: () async {
+                final started = await callService.startCall(
+                  userId: userId,
+                  isVideo: isVideo,
+                );
+                if (!context.mounted || started) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      isVideo
+                          ? context.l10n.cameraAccessDenied
+                          : context.l10n.microphonePermissionRequired,
+                    ),
+                  ),
+                );
+              },
             ),
     );
   }
