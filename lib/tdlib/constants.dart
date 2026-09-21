@@ -42,3 +42,8 @@ const String updateApplicationVerificationRequiredConst =
     'UpdateApplicationVerificationRequired';
 const String updateApplicationRecaptchaVerificationRequiredConst =
     'UpdateApplicationRecaptchaVerificationRequired';
+const String updateNotificationGroupConst = 'UpdateNotificationGroup';
+const String updateNotificationConst = 'UpdateNotification';
+const String updateActiveNotificationsConst = 'UpdateActiveNotifications';
+const String updateHavePendingNotificationsConst =
+    'UpdateHavePendingNotifications';

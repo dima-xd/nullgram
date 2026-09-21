@@ -500,5 +500,29 @@
         "type": "String"
       }
     }
-  }
+  },
+  "notificationPhoto": "Photo",
+  "notificationVideo": "Video",
+  "notificationAnimation": "GIF",
+  "notificationAudio": "Audio",
+  "notificationDocument": "File",
+  "notificationVoiceNote": "Voice message",
+  "notificationVideoNote": "Video message",
+  "notificationSticker": "{emoji} Sticker",
+  "@notificationSticker": {
+    "placeholders": { "emoji": { "type": "String" } }
+  },
+  "notificationContact": "Contact",
+  "notificationLocation": "Location",
+  "notificationPoll": "Poll: {question}",
+  "@notificationPoll": {
+    "placeholders": { "question": { "type": "String" } }
+  },
+  "notificationAlbum": "Album",
+  "notificationMessage": "New message",
+  "notificationSecretChat": "New secret chat",
+  "notificationIncomingCall": "Incoming call",
+  "notificationReply": "Reply",
+  "notificationMarkRead": "Mark as read",
+  "notificationYou": "You"
 }

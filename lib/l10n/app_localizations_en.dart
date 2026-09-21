@@ -1133,4 +1133,62 @@ class AppLocalizationsEn extends AppLocalizations {
   String signInFailed(String reason) {
     return 'Could not sign in: $reason';
   }
+
+  @override
+  String get notificationPhoto => 'Photo';
+
+  @override
+  String get notificationVideo => 'Video';
+
+  @override
+  String get notificationAnimation => 'GIF';
+
+  @override
+  String get notificationAudio => 'Audio';
+
+  @override
+  String get notificationDocument => 'File';
+
+  @override
+  String get notificationVoiceNote => 'Voice message';
+
+  @override
+  String get notificationVideoNote => 'Video message';
+
+  @override
+  String notificationSticker(String emoji) {
+    return '$emoji Sticker';
+  }
+
+  @override
+  String get notificationContact => 'Contact';
+
+  @override
+  String get notificationLocation => 'Location';
+
+  @override
+  String notificationPoll(String question) {
+    return 'Poll: $question';
+  }
+
+  @override
+  String get notificationAlbum => 'Album';
+
+  @override
+  String get notificationMessage => 'New message';
+
+  @override
+  String get notificationSecretChat => 'New secret chat';
+
+  @override
+  String get notificationIncomingCall => 'Incoming call';
+
+  @override
+  String get notificationReply => 'Reply';
+
+  @override
+  String get notificationMarkRead => 'Mark as read';
+
+  @override
+  String get notificationYou => 'You';
 }

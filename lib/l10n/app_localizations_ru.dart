@@ -1139,4 +1139,62 @@ class AppLocalizationsRu extends AppLocalizations {
   String signInFailed(String reason) {
     return 'Не удалось войти: $reason';
   }
+
+  @override
+  String get notificationPhoto => 'Фото';
+
+  @override
+  String get notificationVideo => 'Видео';
+
+  @override
+  String get notificationAnimation => 'GIF';
+
+  @override
+  String get notificationAudio => 'Аудио';
+
+  @override
+  String get notificationDocument => 'Файл';
+
+  @override
+  String get notificationVoiceNote => 'Голосовое сообщение';
+
+  @override
+  String get notificationVideoNote => 'Видеосообщение';
+
+  @override
+  String notificationSticker(String emoji) {
+    return '$emoji Стикер';
+  }
+
+  @override
+  String get notificationContact => 'Контакт';
+
+  @override
+  String get notificationLocation => 'Геопозиция';
+
+  @override
+  String notificationPoll(String question) {
+    return 'Опрос: $question';
+  }
+
+  @override
+  String get notificationAlbum => 'Альбом';
+
+  @override
+  String get notificationMessage => 'Новое сообщение';
+
+  @override
+  String get notificationSecretChat => 'Новый секретный чат';
+
+  @override
+  String get notificationIncomingCall => 'Входящий звонок';
+
+  @override
+  String get notificationReply => 'Ответить';
+
+  @override
+  String get notificationMarkRead => 'Прочитано';
+
+  @override
+  String get notificationYou => 'Вы';
 }

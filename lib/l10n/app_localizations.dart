@@ -2185,6 +2185,114 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not sign in: {reason}'**
   String signInFailed(String reason);
+
+  /// No description provided for @notificationPhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Photo'**
+  String get notificationPhoto;
+
+  /// No description provided for @notificationVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get notificationVideo;
+
+  /// No description provided for @notificationAnimation.
+  ///
+  /// In en, this message translates to:
+  /// **'GIF'**
+  String get notificationAnimation;
+
+  /// No description provided for @notificationAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get notificationAudio;
+
+  /// No description provided for @notificationDocument.
+  ///
+  /// In en, this message translates to:
+  /// **'File'**
+  String get notificationDocument;
+
+  /// No description provided for @notificationVoiceNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice message'**
+  String get notificationVoiceNote;
+
+  /// No description provided for @notificationVideoNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Video message'**
+  String get notificationVideoNote;
+
+  /// No description provided for @notificationSticker.
+  ///
+  /// In en, this message translates to:
+  /// **'{emoji} Sticker'**
+  String notificationSticker(String emoji);
+
+  /// No description provided for @notificationContact.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact'**
+  String get notificationContact;
+
+  /// No description provided for @notificationLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get notificationLocation;
+
+  /// No description provided for @notificationPoll.
+  ///
+  /// In en, this message translates to:
+  /// **'Poll: {question}'**
+  String notificationPoll(String question);
+
+  /// No description provided for @notificationAlbum.
+  ///
+  /// In en, this message translates to:
+  /// **'Album'**
+  String get notificationAlbum;
+
+  /// No description provided for @notificationMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New message'**
+  String get notificationMessage;
+
+  /// No description provided for @notificationSecretChat.
+  ///
+  /// In en, this message translates to:
+  /// **'New secret chat'**
+  String get notificationSecretChat;
+
+  /// No description provided for @notificationIncomingCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Incoming call'**
+  String get notificationIncomingCall;
+
+  /// No description provided for @notificationReply.
+  ///
+  /// In en, this message translates to:
+  /// **'Reply'**
+  String get notificationReply;
+
+  /// No description provided for @notificationMarkRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark as read'**
+  String get notificationMarkRead;
+
+  /// No description provided for @notificationYou.
+  ///
+  /// In en, this message translates to:
+  /// **'You'**
+  String get notificationYou;
 }
 
 class _AppLocalizationsDelegate

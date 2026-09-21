@@ -4,6 +4,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// A build without Firebase credentials must still work: the app then has no
+// FCM token and registers no device.
+
+// The debug variant is org.nullgram.debug, so the Firebase project must
+// register that package name too or processDebugGoogleServices fails.
+val hasFirebase = file("google-services.json").exists()
+if (hasFirebase) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     sourceSets {
         getByName("main") {
@@ -72,4 +82,6 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-messaging")
 }

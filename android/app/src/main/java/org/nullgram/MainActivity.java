@@ -11,9 +11,31 @@ import io.flutter.embedding.engine.FlutterEngine;
  * refuses to show without a FragmentActivity host.
  */
 public class MainActivity extends FlutterFragmentActivity {
+    private TDLibBridge bridge;
+    private PushChannel pushChannel;
+
     @Override
     public void configureFlutterEngine(FlutterEngine flutterEngine) {
         super.configureFlutterEngine(flutterEngine);
-        new TDLibBridge(flutterEngine.getDartExecutor().getBinaryMessenger());
+        bridge = new TDLibBridge(
+                flutterEngine.getDartExecutor().getBinaryMessenger(), true);
+
+        // The app supersedes the headless engine, so drop it before attaching.
+        // Order is free here: a bridge adds no sink until Dart subscribes.
+        NullgramMessagingService.stopPushEngine();
+
+        pushChannel = PushChannel.attachMain(
+                flutterEngine.getDartExecutor().getBinaryMessenger());
+    }
+
+    @Override
+    public void cleanUpFlutterEngine(FlutterEngine flutterEngine) {
+        // Dropping the sink matters: a destroyed engine that kept one would
+        // leave the update buffer switched off for the next engine.
+        if (bridge != null) bridge.dispose();
+        bridge = null;
+        PushChannel.detachMain(pushChannel);
+        pushChannel = null;
+        super.cleanUpFlutterEngine(flutterEngine);
     }
 }

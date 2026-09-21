@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Bridges Flutter to TDLib, holding one {@link Client} per signed-in account.
@@ -39,9 +40,15 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
     /** The account id used before any account has been added. */
     private static final int DEFAULT_ACCOUNT_ID = 1;
 
-    private static EventChannel.EventSink updateSink;
+    /** Every attached engine's sink; one field would let the engine that
+     *  attached last silence the other. */
+    private static final List<EventChannel.EventSink> updateSinks =
+            new CopyOnWriteArrayList<>();
 
     private final MethodChannel tdlibChannel;
+
+    /** This engine's own sink, held so {@link #dispose} can withdraw it. */
+    private EventChannel.EventSink sink;
 
     /**
      * The running clients, keyed by account id.
@@ -52,31 +59,46 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
      * carries the replies to every pending request: losing it makes the whole
      * bridge go quiet rather than fail loudly.
      */
-    private final Map<Integer, Client> clients = new ConcurrentHashMap<>();
+    private static final Map<Integer, Client> clients =
+            new ConcurrentHashMap<>();
 
     /** Accounts whose client was closed, whose trailing updates are ignored. */
-    private final Set<Integer> closedAccounts =
+    private static final Set<Integer> closedAccounts =
             Collections.newSetFromMap(new ConcurrentHashMap<>());
 
-    private final List<String> pendingUpdates = new ArrayList<>();
+    private static final List<String> pendingUpdates =
+            Collections.synchronizedList(new ArrayList<>());
 
-    private volatile int activeAccountId = DEFAULT_ACCOUNT_ID;
+    /** Shared by every engine in the process, so the push engine must name
+     *  its account explicitly rather than rely on this. */
+    private static volatile int activeAccountId = DEFAULT_ACCOUNT_ID;
 
-    public TDLibBridge(BinaryMessenger messenger) {
+    /** Whether this engine may take the updates buffered while no engine was
+     *  listening; only the app's may, or the push engine steals them. */
+    private final boolean takesBufferedUpdates;
+
+    public TDLibBridge(BinaryMessenger messenger, boolean takesBufferedUpdates) {
+        this.takesBufferedUpdates = takesBufferedUpdates;
+
         new EventChannel(messenger, "tdlib_updates")
                 .setStreamHandler(new EventChannel.StreamHandler() {
                     @Override
                     public void onListen(Object arguments, EventChannel.EventSink events) {
-                        updateSink = events;
-                        for (String update : pendingUpdates) {
-                            events.success(update);
+                        TDLibBridge.this.sink = events;
+                        updateSinks.add(events);
+                        if (!TDLibBridge.this.takesBufferedUpdates) return;
+                        synchronized (pendingUpdates) {
+                            for (String update : pendingUpdates) {
+                                events.success(update);
+                            }
+                            pendingUpdates.clear();
                         }
-                        pendingUpdates.clear();
                     }
 
                     @Override
                     public void onCancel(Object arguments) {
-                        updateSink = null;
+                        if (sink != null) updateSinks.remove(sink);
+                        TDLibBridge.this.sink = null;
                     }
                 });
 
@@ -90,6 +112,14 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
         } catch (Client.ExecutionException e) {
             System.err.println("Failed to set log verbosity: " + e.error.message);
         }
+    }
+
+    /** Drops this engine's sink so a destroyed engine cannot keep the update
+     *  buffer switched off for the next one. */
+    public void dispose() {
+        tdlibChannel.setMethodCallHandler(null);
+        if (sink != null) updateSinks.remove(sink);
+        sink = null;
     }
 
     @Override
@@ -109,6 +139,9 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
                 return;
             case "send":
                 send(call, result);
+                return;
+            case "execute":
+                execute(call, result);
                 return;
             default:
                 result.notImplemented();
@@ -180,6 +213,26 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
         }
     }
 
+    /** Runs a synchronous TDLib function, which belongs to no client, so a
+     *  push can be routed to an account before that account has one. */
+    private void execute(MethodCall call, MethodChannel.Result result) {
+        try {
+            TdApi.Object answer;
+            // A TDLib error is answered as a normal result: it encodes without
+            // a `data` key, which is how Dart reads "no result".
+            try {
+                JSONObject obj = new JSONObject((String) call.argument("json"));
+                TdApi.Function<?> query = TdApiConverter.fromJson(obj);
+                answer = Client.execute(query);
+            } catch (Client.ExecutionException e) {
+                answer = e.error;
+            }
+            result.success(encodeResult(answer));
+        } catch (Exception e) {
+            result.error("EXECUTE_ERROR", e.getMessage(), null);
+        }
+    }
+
     /** Shapes a TDLib response into the map the Dart client expects. */
     private Object encodeResult(TdApi.Object object) throws Exception {
         if (object instanceof TdApi.OptionValueString) {
@@ -202,7 +255,7 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
         return response;
     }
 
-    private void onUpdate(int accountId, TdApi.Object object) {
+    private static void onUpdate(int accountId, TdApi.Object object) {
         // A client removed by closeAccount can still emit its closing updates;
         // nothing in Dart is listening for them any more.
         if (closedAccounts.contains(accountId)) return;
@@ -222,7 +275,7 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
      * would throw inside the update stream and take the rest of the session's
      * updates down with it.
      */
-    private void onError(int accountId, Throwable e) {
+    private static void onError(int accountId, Throwable e) {
         try {
             JSONObject error = new JSONObject();
             error.put("@type", "UpdateBridgeError");
@@ -234,20 +287,16 @@ public class TDLibBridge implements MethodChannel.MethodCallHandler {
         }
     }
 
-    /**
-     * Hands a serialized update to Dart, buffering it while no listener is
-     * attached.
-     *
-     * <p>The event channel is subscribed asynchronously, so the first updates
-     * of a freshly created client — including the authorization state that
-     * drives the whole login flow — can arrive before Dart is listening.
-     */
-    private void emit(String update) {
+    /** Hands an update to every attached engine, buffering it while none is,
+     *  since a new client's authorization updates precede Dart's subscribe. */
+    private static void emit(String update) {
         mainHandler.post(() -> {
-            if (updateSink != null) {
-                updateSink.success(update);
-            } else {
+            if (updateSinks.isEmpty()) {
                 pendingUpdates.add(update);
+                return;
+            }
+            for (EventChannel.EventSink sink : updateSinks) {
+                sink.success(update);
             }
         });
     }

@@ -3,31 +3,20 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:logger/logger.dart';
 import 'package:nullgram/services/auto_download.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/services/notification_service.dart';
+import 'package:nullgram/services/push_service.dart';
+import 'package:nullgram/services/tdlib_bootstrap.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-final _log = Logger();
-
-/// The TDLib parameters shared by every account, so a client can be started
-/// for an account added long after the app booted.
-///
-/// Only the database and files directory differ per account, and those are
-/// derived from the account itself.
-typedef TdlibConfig = ({
-  List<int> databaseEncryptionKey,
-  int apiId,
-  String apiHash,
-  String systemLanguageCode,
-  String deviceModel,
-  String systemVersion,
-  String applicationVersion,
-});
+// A production filter, or a release build logs nothing at all, including the
+// line that says an account could not be brought online for a push.
+final _log = Logger(filter: ProductionFilter());
 
 /// One account known to the app, signed in or half-way through signing in.
 @immutable
@@ -173,6 +162,10 @@ class AccountManager extends ChangeNotifier {
   /// configured the account.
   final Set<int> _configured = {};
 
+  /// Accounts whose client started and was configured without throwing,
+  /// unlike [_configured], which is set before the options round trip.
+  final Set<int> _online = {};
+
   /// Accounts whose parameters were re-sent after their client turned up
   /// unconfigured, so the repair is attempted at most once per session.
   final Set<int> _reconfigured = {};
@@ -200,6 +193,9 @@ class AccountManager extends ChangeNotifier {
   /// reports `WaitPhoneNumber` — which would otherwise throw the user onto the
   /// login screen for a frame.
   bool get isSwitching => _isSwitching;
+
+  /// Whether [id] has a started, configured client in this isolate.
+  bool isOnline(int id) => _online.contains(id);
 
   /// The account with [id], or null when it is unknown.
   Account? accountOf(int id) {
@@ -244,6 +240,10 @@ class AccountManager extends ChangeNotifier {
     if (accountOf(_activeId) == null) _activeId = _accounts.first.id;
     await _persist();
 
+    // Installed rather than imported the other way round: the push service
+    // has no business knowing which accounts exist.
+    PushService.instance.reregisterAccounts = _registerAll;
+
     TDLibClient.unreadCountUpdates.listen(_onUnreadUpdate);
     TDLibClient.backgroundUpdates.listen(_onBackgroundUpdate);
     TDLibClient.authStateUpdates.listen(_onAuthUpdate);
@@ -263,6 +263,41 @@ class AccountManager extends ChangeNotifier {
     // them one after another put every account's round trips in front of the
     // first frame.
     await Future.wait(_accounts.map(_startClient));
+  }
+
+  /// Registers every signed-in account for pushes again, after a token
+  /// refresh made the previous registrations worthless.
+  Future<void> _registerAll() async {
+    for (final account in _accounts) {
+      if (account.isPending) continue;
+      await PushService.instance.register(account.id);
+    }
+  }
+
+  /// Brings one account online without touching the rest, for the push
+  /// isolate and the shade actions, which have only seconds to live.
+  Future<void> initSingle({
+    required String documentsPath,
+    required TdlibConfig config,
+    required int accountId,
+  }) async {
+    _documentsPath = documentsPath;
+    _config = config;
+    _preferences = await SharedPreferences.getInstance();
+
+    _accounts = decodeAccounts(_preferences.getString(_accountsKey));
+    if (_accounts.isEmpty) _accounts = [_legacyAccount()];
+
+    final account = accountOf(accountId);
+    if (account == null) {
+      _log.w('No account $accountId to bring online');
+      return;
+    }
+    await _startClient(account);
+    _activeId = accountId;
+    // Assigned rather than set through the bridge: the native active account
+    // is process-wide, and retargeting it would hijack the running app.
+    TDLibClient.activeAccountId = accountId;
   }
 
   /// The account of an install that predates multi-account support.
@@ -318,6 +353,20 @@ class AccountManager extends ChangeNotifier {
       applicationVersion: _config.applicationVersion,
     );
     _configured.add(account.id);
+
+    // TDLib sends no notification updates at all until the group count is
+    // positive, which is what makes the whole notification path work.
+    await TDLibClient.setIntOption(
+      name: 'notification_group_count_max',
+      value: 25,
+      accountId: account.id,
+    );
+    await TDLibClient.setIntOption(
+      name: 'notification_group_size_max',
+      value: 10,
+      accountId: account.id,
+    );
+    _online.add(account.id);
   }
 
   /// Brings [accountId] on screen.
@@ -337,7 +386,6 @@ class AccountManager extends ChangeNotifier {
     _activeId = accountId;
     notifyListeners();
 
-    NotificationService.instance.stop();
     // Swapped rather than dropped: the account being left keeps its chats, so
     // coming back to it paints at once instead of re-fetching the whole list.
     ChatStore.instance.swap(from: previous, to: accountId);
@@ -417,6 +465,10 @@ class AccountManager extends ChangeNotifier {
   /// once its client reports itself closed.
   Future<void> _forget(Account account) async {
     _closing[account.id] = account.directory;
+    // The single point every removal passes through, so the push registration
+    // is dropped here rather than once per way of signing an account out.
+    unawaited(PushService.instance.forget(account.id));
+    unawaited(NotificationService.instance.clearAccount(account.id));
     ChatStore.instance.forgetSnapshot(account.id);
     _accounts = [
       for (final other in _accounts)
@@ -424,6 +476,7 @@ class AccountManager extends ChangeNotifier {
     ];
     _profiles.remove(account.id);
     _unread.remove(account.id);
+    _online.remove(account.id);
     await _persist();
     notifyListeners();
   }
@@ -480,6 +533,7 @@ class AccountManager extends ChangeNotifier {
       // startup — where no client has answered yet.
       case 'AuthorizationStateReady':
         _refreshProfile(accountId);
+        unawaited(PushService.instance.register(accountId));
       case 'AuthorizationStateWaitTdlibParameters':
         _reconfigure(accountId);
       case 'AuthorizationStateClosed':
@@ -517,9 +571,11 @@ class AccountManager extends ChangeNotifier {
     switch (state['@type']) {
       case 'AuthorizationStateReady':
         _refreshProfile(_activeId);
+        unawaited(PushService.instance.register(_activeId));
       case 'AuthorizationStateWaitTdlibParameters':
         _reconfigure(_activeId);
       case 'AuthorizationStateLoggingOut':
+        unawaited(PushService.instance.forget(_activeId));
         _onActiveLoggingOut();
     }
   }
@@ -576,4 +632,31 @@ class AccountManager extends ChangeNotifier {
     await _persist();
     notifyListeners();
   }
+}
+
+/// Brings [accountId] online in an isolate with no app around it, resolving
+/// what `main` would. Safe to repeat: a later push finds it already online.
+Future<void> bringAccountOnline(int accountId) async {
+  // The callers are entry points of their own isolates, where nothing else
+  // has set the binding up that every plugin below needs.
+  WidgetsFlutterBinding.ensureInitialized();
+  TDLibClient.initTdlibUpdates();
+
+  if (AccountManager.instance.isOnline(accountId)) return;
+
+  final TdlibBootstrap bootstrap;
+  try {
+    bootstrap = await resolveTdlibBootstrap();
+  } catch (e) {
+    // Unhandled, this would lose the push without a word: a build with no
+    // credentials cannot start a client at all.
+    _log.e('Cannot bring account $accountId online', error: e);
+    return;
+  }
+
+  await AccountManager.instance.initSingle(
+    documentsPath: bootstrap.documentsPath,
+    accountId: accountId,
+    config: bootstrap.config,
+  );
 }

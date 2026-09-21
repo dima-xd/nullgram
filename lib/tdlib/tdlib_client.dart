@@ -10,7 +10,9 @@ import 'package:rxdart/rxdart.dart';
 
 import 'constants.dart';
 
-var logger = Logger();
+// A production filter, or a release build logs nothing at all and a TDLib
+// failure behind a missing notification leaves no trace in logcat.
+var logger = Logger(filter: ProductionFilter());
 
 class TDLibClient {
   static const _channel = MethodChannel('tdlib_channel');
@@ -106,11 +108,8 @@ class TDLibClient {
   /// The account id an install starts with, before any account is added.
   static const int defaultAccountId = 1;
 
-  /// The account whose updates reach the UI, and the default target of every
-  /// request that does not name an account explicitly.
-  ///
-  /// Kept in step with the bridge by [setActiveAccount]; assigning it directly
-  /// would leave the native side pointing at the previous client.
+  /// Default target of a request naming no account, set by [setActiveAccount];
+  /// only a push isolate assigns it directly, to leave the shared bridge be.
   static int activeAccountId = defaultAccountId;
 
   static final _backgroundController = PublishSubject<Map<String, dynamic>>();
@@ -128,6 +127,14 @@ class TDLibClient {
   /// `@accountId`. Feeds the per-account badges in the account switcher.
   static Stream<Map<String, dynamic>> get unreadCountUpdates =>
       _unreadController.stream;
+
+  static final _notificationsController =
+      PublishSubject<Map<String, dynamic>>();
+
+  /// TDLib's notification updates from every account, active or not, tagged
+  /// with `@accountId`. Not filtered by the active account like the stores.
+  static Stream<Map<String, dynamic>> get notificationUpdates =>
+      _notificationsController.stream;
 
   /// Starts a TDLib client for [accountId] if one is not running yet.
   ///
@@ -236,6 +243,7 @@ class TDLibClient {
     List<Map<String, dynamic>>? entities,
     SendOptions options = SendOptions.normal,
     int messageThreadId = 0,
+    int? accountId,
   }) async {
     final jsonMap = {
       "@type": "sendMessage",
@@ -257,9 +265,10 @@ class TDLibClient {
       },
     };
 
-    final result = await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap)
-    });
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode(jsonMap), accountId),
+    );
 
     if (result is Map && result["data"] != null) {
       final data = result["data"] is String
@@ -866,6 +875,7 @@ class TDLibClient {
     required List<int> messageIds,
     bool forceRead = false,
     Map<String, dynamic>? source,
+    int? accountId,
   }) async {
     if (messageIds.isEmpty) return;
     final jsonMap = {
@@ -876,9 +886,10 @@ class TDLibClient {
       "forceRead": forceRead,
     };
 
-    await _channel.invokeMethod('send', {
-      'json': jsonEncode(jsonMap)
-    });
+    await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode(jsonMap), accountId),
+    );
   }
 
   /// Informs TDLib that the user opened [chatId]. Required for read receipts
@@ -943,10 +954,14 @@ class TDLibClient {
   /// is mounted and subscribed), this can be called at any time to recover the
   /// real on-disk state. Used to reconcile media that finished downloading—or
   /// was evicted from TDLib's cache—while the widget was off-screen.
-  static Future<Map<String, dynamic>?> getFile({required int fileId}) async {
-    final result = await _channel.invokeMethod('send', {
-      'json': jsonEncode({"@type": "getFile", "fileId": fileId}),
-    });
+  static Future<Map<String, dynamic>?> getFile({
+    required int fileId,
+    int? accountId,
+  }) async {
+    final result = await _channel.invokeMethod(
+      'send',
+      _sendArgs(jsonEncode({"@type": "getFile", "fileId": fileId}), accountId),
+    );
 
     if (result["data"] == null) return null;
     return result["data"] is String
@@ -1279,7 +1294,11 @@ class TDLibClient {
     await _channel.invokeMethod('send', {'json': jsonEncode(jsonMap)});
   }
 
+  static bool _updatesStarted = false;
+
   static void initTdlibUpdates() {
+    if (_updatesStarted) return;
+    _updatesStarted = true;
     _updatesChannel.receiveBroadcastStream().listen((event) {
       final Map<String, dynamic> update;
       try {
@@ -1314,6 +1333,19 @@ class TDLibClient {
       // before the active-account filter below.
       if (type == updateUnreadChatCountConst) {
         _unreadController.add(update);
+        return;
+      }
+
+      // Notifications are wanted from every account too, most of all in the
+      // push isolate, where no account is ever the active one.
+      if (type == updateNotificationGroupConst ||
+          type == updateActiveNotificationsConst ||
+          type == updateNotificationConst ||
+          type == updateHavePendingNotificationsConst) {
+        _notificationsController.add({
+          ...update,
+          '@accountId': update['@accountId'] ?? activeAccountId,
+        });
         return;
       }
 
@@ -1422,6 +1454,30 @@ class TDLibClient {
       }
       return null;
     }
+    final decoded = data is String
+        ? jsonDecode(data) as Map<String, dynamic>
+        : data as Map<String, dynamic>;
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  /// Runs a synchronous TDLib function, which needs no client. Used by
+  /// `getPushReceiverId`, which must run before any client exists.
+  static Future<Map<String, dynamic>?> executeSync(
+    Map<String, dynamic> request,
+  ) async {
+    final dynamic result;
+    try {
+      result = await _channel.invokeMethod(
+        'execute',
+        {'json': jsonEncode(request)},
+      );
+    } catch (e) {
+      logger.e('TDLib execute ${request['@type']} failed', error: e);
+      return null;
+    }
+    if (result is! Map) return null;
+    final data = result['data'];
+    if (data == null) return null;
     final decoded = data is String
         ? jsonDecode(data) as Map<String, dynamic>
         : data as Map<String, dynamic>;
@@ -2756,4 +2812,82 @@ class TDLibClient {
     "lastName": lastName,
     "disableNotification": disableNotification,
   });
+
+  // Push notifications
+  // ---------------------------------------------------------------------------
+
+  /// Subscribes this device to Telegram's pushes for [accountId], returning
+  /// the push receiver id. `encrypt` is on so the server never sees the text.
+  static Future<int?> registerDevice({
+    required String token,
+    int? accountId,
+  }) async {
+    final data = await _request({
+      "@type": "registerDevice",
+      "deviceToken": {
+        "@type": "deviceTokenFirebaseCloudMessaging",
+        "token": token,
+        "encrypt": true,
+      },
+      "otherUserIds": <int>[],
+    }, accountId: accountId);
+    return (data?['id'] as num?)?.toInt();
+  }
+
+  /// Hands TDLib the raw push payload to decrypt into notifications.
+  /// Completes once every update has been sent, so the client may then close.
+  static Future<void> processPushNotification({
+    required String payload,
+    int? accountId,
+  }) =>
+      _execute(
+        {"@type": "processPushNotification", "payload": payload},
+        accountId: accountId,
+      );
+
+  /// The push receiver id a payload is addressed to, or null when it cannot
+  /// be read. Zero means every client should process it.
+  static Future<int?> getPushReceiverId(String payload) async {
+    final data = await executeSync({
+      "@type": "getPushReceiverId",
+      "payload": payload,
+    });
+    return (data?['id'] as num?)?.toInt();
+  }
+
+  /// Tells TDLib a whole notification group was dismissed.
+  static Future<void> removeNotificationGroup({
+    required int notificationGroupId,
+    required int maxNotificationId,
+    int? accountId,
+  }) =>
+      _execute({
+        "@type": "removeNotificationGroup",
+        "notificationGroupId": notificationGroupId,
+        "maxNotificationId": maxNotificationId,
+      }, accountId: accountId);
+
+  /// Tells TDLib a single notification was dismissed.
+  static Future<void> removeNotification({
+    required int notificationGroupId,
+    required int notificationId,
+    int? accountId,
+  }) =>
+      _execute({
+        "@type": "removeNotification",
+        "notificationGroupId": notificationGroupId,
+        "notificationId": notificationId,
+      }, accountId: accountId);
+
+  /// Sets an integer TDLib option, used to switch the Notification API on.
+  static Future<void> setIntOption({
+    required String name,
+    required int value,
+    int? accountId,
+  }) =>
+      _execute({
+        "@type": "setOption",
+        "name": name,
+        "value": {"@type": "optionValueInteger", "value": value},
+      }, accountId: accountId);
 }

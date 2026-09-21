@@ -169,7 +169,7 @@ class _ChatPageState extends State<ChatPage> {
     // Suppress notifications for the chat currently on screen, and clear any
     // the user is about to read anyway.
     NotificationService.instance.activeChatId = _chatId;
-    NotificationService.instance.clear(_chatId);
+    NotificationService.instance.clearChat(_chatId);
 
     final initialMessageId = widget.initialMessageId;
     if (initialMessageId != null) {

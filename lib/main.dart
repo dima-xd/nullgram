@@ -1,11 +1,7 @@
 import 'dart:async';
-import 'dart:ui';
 
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
-import 'package:nullgram/app_credentials.dart';
-import 'package:nullgram/app_info.dart';
 import 'package:nullgram/theme/app_theme.dart';
 import 'package:nullgram/pages/auth/code_input_page.dart';
 import 'package:nullgram/pages/auth/login_page.dart';
@@ -19,12 +15,13 @@ import 'package:nullgram/services/auto_download.dart';
 import 'package:nullgram/services/language_service.dart';
 import 'package:nullgram/pages/passcode/passcode_lock_screen.dart';
 import 'package:nullgram/services/passcode_service.dart';
+import 'package:nullgram/services/push_service.dart';
+import 'package:nullgram/services/tdlib_bootstrap.dart';
 import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/services/call_service.dart';
 import 'package:nullgram/pages/call/call_overlay.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/tdlib/tdlib_helper.dart';
-import 'package:path_provider/path_provider.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -73,11 +70,14 @@ void main() async {
 
   TDLibClient.initTdlibUpdates();
 
+  PushService.instance.listenForTokenRefresh();
+
   callService = buildCallService();
 
   // Started here and awaited below: it only needs to be listening before the
   // first client comes online, and its plugin setup can run while the three
   // platform lookups the accounts need are in flight.
+  NotificationService.instance.hasUi = true;
   final notifications = NotificationService.instance.init();
 
   TDLibClient.authStateUpdates.listen((state) {
@@ -141,7 +141,6 @@ void main() async {
               resetStateOnPop: 'AuthorizationStateWaitCode',
             ));
       case 'AuthorizationStateReady':
-        NotificationService.instance.start();
         ChatStore.instance.start();
         _postFrame(() {
           _resetTo(const HomePage());
@@ -150,28 +149,19 @@ void main() async {
     }
   });
 
-  // Three independent platform round trips that everything below waits on, so
-  // they are made at once rather than one after another.
-  final (credentials, androidInfo, appDir) = await (
-    AppCredentials.resolve(),
-    DeviceInfoPlugin().androidInfo,
-    getApplicationDocumentsDirectory(),
-  ).wait;
+  final bootstrap = await resolveTdlibBootstrap();
 
   await notifications;
 
   await AccountManager.instance.init(
-    documentsPath: appDir.path,
-    config: (
-      databaseEncryptionKey: credentials.databaseEncryptionKey.codeUnits,
-      apiId: credentials.apiId,
-      apiHash: credentials.apiHash,
-      systemLanguageCode: PlatformDispatcher.instance.locale.languageCode,
-      deviceModel: androidInfo.model,
-      systemVersion: androidInfo.version.release,
-      applicationVersion: appVersion,
-    ),
+    documentsPath: bootstrap.documentsPath,
+    config: bootstrap.config,
   );
+
+  // Only now can this engine act on a push or on a tapped notification: both
+  // need a client, and saying so stops a headless engine starting beside it.
+  unawaited(PushService.instance.markReady());
+  unawaited(NotificationService.instance.onAccountsOnline());
 
   // Both read preferences, neither depends on the other, and the passcode has
   // to be known before the first frame so a locked app never flashes its
