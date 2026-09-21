@@ -7,6 +7,7 @@ import 'package:nullgram/l10n/l10n.dart';
 enum ChatMenuAction {
   openProfile,
   search,
+  videoCall,
   selectMessages,
   scheduledMessages,
   toggleMute,
@@ -51,6 +52,14 @@ Future<ChatMenuAction?> showChatMenu({
             label: context.l10n.searchInChat,
             action: ChatMenuAction.search,
           ),
+          // The app bar only has room for the voice call before the title
+          // starts truncating, so the video call lives here.
+          if (isPrivate && !isSaved)
+            _Item(
+              icon: Icons.videocam_outlined,
+              label: context.l10n.videoCall,
+              action: ChatMenuAction.videoCall,
+            ),
           _Item(
             icon: Icons.checklist,
             label: context.l10n.selectMessages,

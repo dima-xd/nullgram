@@ -1,5 +1,13 @@
 {
   "@@locale": "ru",
+  "comments": "Комментарии",
+  "commentsCount": "{count, plural, =1{1 комментарий} few{{count} комментария} other{{count} комментариев}}",
+  "repliesCount": "{count, plural, =1{1 ответ} few{{count} ответа} other{{count} ответов}}",
+  "leaveComment": "Оставить комментарий",
+  "noCommentsYet": "Комментариев пока нет",
+  "noCommentsHint": "Прокомментируйте этот пост первым.",
+  "joinDiscussion": "Присоединиться к обсуждению",
+  "threadUnavailable": "У этого сообщения нет обсуждения.",
   "passcodeSubtitle": "Локальная блокировка самого приложения",
   "passcodeExplanation": "Код-пароль блокирует приложение на этом устройстве. Это не то же, что двухэтапная проверка, которая защищает сам аккаунт.",
   "twoStepSubtitle": "Пароль в дополнение к коду входа",

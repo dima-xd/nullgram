@@ -9,6 +9,46 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get comments => 'Comments';
+
+  @override
+  String commentsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count comments',
+      one: '1 comment',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String repliesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count replies',
+      one: '1 reply',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get leaveComment => 'Leave a comment';
+
+  @override
+  String get noCommentsYet => 'No comments yet';
+
+  @override
+  String get noCommentsHint => 'Be the first to comment on this post.';
+
+  @override
+  String get joinDiscussion => 'Join discussion';
+
+  @override
+  String get threadUnavailable => 'This message has no discussion.';
+
+  @override
   String get passcodeSubtitle => 'A local lock over the app itself';
 
   @override

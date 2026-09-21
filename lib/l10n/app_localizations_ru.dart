@@ -9,6 +9,48 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get comments => 'Комментарии';
+
+  @override
+  String commentsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count комментариев',
+      few: '$count комментария',
+      one: '1 комментарий',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String repliesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ответов',
+      few: '$count ответа',
+      one: '1 ответ',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get leaveComment => 'Оставить комментарий';
+
+  @override
+  String get noCommentsYet => 'Комментариев пока нет';
+
+  @override
+  String get noCommentsHint => 'Прокомментируйте этот пост первым.';
+
+  @override
+  String get joinDiscussion => 'Присоединиться к обсуждению';
+
+  @override
+  String get threadUnavailable => 'У этого сообщения нет обсуждения.';
+
+  @override
   String get passcodeSubtitle => 'Локальная блокировка самого приложения';
 
   @override

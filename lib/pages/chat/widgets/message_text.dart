@@ -10,9 +10,14 @@ import 'package:nullgram/theme/app_theme.dart';
 class MessageText extends StatefulWidget {
   final Map<String, dynamic> content;
 
+  /// Appended after the last word, so a short message keeps its timestamp on
+  /// the same line instead of paying for a whole empty row beneath it.
+  final InlineSpan? trailing;
+
   const MessageText({
     super.key,
     required this.content,
+    this.trailing,
   });
 
   @override
@@ -47,9 +52,13 @@ class _MessageTextState extends State<MessageText> {
     final baseStyle = (theme.textTheme.bodyLarge ?? const TextStyle())
         .copyWith(color: theme.colorScheme.onSurface);
 
+    final trailing = widget.trailing;
     final entities = widget.content['entities'] as List? ?? const [];
     if (entities.isEmpty) {
-      return Text(text, style: baseStyle);
+      if (trailing == null) return Text(text, style: baseStyle);
+      return Text.rich(
+        TextSpan(text: text, style: baseStyle, children: [trailing]),
+      );
     }
 
     _disposeRecognizers();
@@ -60,7 +69,9 @@ class _MessageTextState extends State<MessageText> {
       linkColor: context.chatColors.bubbleLink,
       codeBackground: context.chatColors.codeBackground,
     );
-    return Text.rich(TextSpan(children: spans));
+    return Text.rich(
+      TextSpan(children: [...spans, if (trailing != null) trailing]),
+    );
   }
 
   /// Splits [text] at every entity boundary and emits one [TextSpan] per

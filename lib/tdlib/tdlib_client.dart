@@ -224,16 +224,23 @@ class TDLibClient {
         'accountId': accountId ?? activeAccountId,
       };
 
-  static Future<void> sendMessage({
+  /// Sends a text message.
+  ///
+  /// Returns null on success, or TDLib's error message when the send was
+  /// refused — a non-member commenting on a channel post gets an error whose
+  /// message contains "FORBIDDEN".
+  static Future<String?> sendMessage({
     required int chatId,
     required String text,
     int? replyToMessageId,
     List<Map<String, dynamic>>? entities,
     SendOptions options = SendOptions.normal,
+    int messageThreadId = 0,
   }) async {
     final jsonMap = {
       "@type": "sendMessage",
       "chatId": chatId,
+      if (messageThreadId != 0) "messageThreadId": messageThreadId,
       if (replyToMessageId != null)
         "replyTo": {
           "@type": "inputMessageReplyToMessage",
@@ -250,9 +257,17 @@ class TDLibClient {
       },
     };
 
-    await _channel.invokeMethod('send', {
+    final result = await _channel.invokeMethod('send', {
       'json': jsonEncode(jsonMap)
     });
+
+    if (result is Map && result["data"] != null) {
+      final data = result["data"] is String
+          ? jsonDecode(result["data"]) as Map<String, dynamic>
+          : result["data"] as Map<String, dynamic>;
+      if (data["@type"] == "Error") return data["message"] as String?;
+    }
+    return null;
   }
 
   /// Parses [text] as Telegram MarkdownV2 into a `formattedText`.
@@ -850,12 +865,14 @@ class TDLibClient {
     required int chatId,
     required List<int> messageIds,
     bool forceRead = false,
+    Map<String, dynamic>? source,
   }) async {
     if (messageIds.isEmpty) return;
     final jsonMap = {
       "@type": "viewMessages",
       "chatId": chatId,
       "messageIds": messageIds,
+      if (source != null) "source": source,
       "forceRead": forceRead,
     };
 
@@ -964,6 +981,74 @@ class TDLibClient {
       }
     }
     return null;
+  }
+
+  /// Resolves the thread a message belongs to.
+  ///
+  /// For a channel post the returned `chatId` is the channel's linked
+  /// discussion supergroup, not the channel — every later thread call must use
+  /// that id. Returns null when the message has no thread (TDLib answers with
+  /// an error), which is how the caller decides to show a snackbar.
+  static Future<Map<String, dynamic>?> getMessageThread({
+    required int chatId,
+    required int messageId,
+  }) async {
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode({
+        "@type": "getMessageThread",
+        "chatId": chatId,
+        "messageId": messageId,
+      }),
+    });
+
+    if (result["data"] == null) return null;
+    try {
+      final data = result["data"] is String
+          ? jsonDecode(result["data"]) as Map<String, dynamic>
+          : result["data"] as Map<String, dynamic>;
+      if (data["@type"] == "Error") return null;
+      return data;
+    } catch (e, stackTrace) {
+      logger.e("Failed to parse message thread",
+          error: e, stackTrace: stackTrace);
+      return null;
+    }
+  }
+
+  /// One page of a thread's history, newest first.
+  ///
+  /// [messageId] is the thread's root message *in [chatId]* — that is
+  /// `messageThreadInfo.messageThreadId`, not the channel post's own id.
+  /// TDLib may return fewer than [limit] messages, so callers must page.
+  static Future<Messages?> getMessageThreadHistory({
+    required int chatId,
+    required int messageId,
+    int fromMessageId = 0,
+    required int offset,
+    required int limit,
+  }) async {
+    final result = await _channel.invokeMethod('send', {
+      'json': jsonEncode({
+        "@type": "getMessageThreadHistory",
+        "chatId": chatId,
+        "messageId": messageId,
+        "fromMessageId": fromMessageId,
+        "offset": offset,
+        "limit": limit,
+      }),
+    });
+
+    if (result["data"] == null) return null;
+    try {
+      final data = result["data"] is String
+          ? jsonDecode(result["data"]) as Map<String, dynamic>
+          : result["data"] as Map<String, dynamic>;
+      return Messages.fromJson(data);
+    } catch (e, stackTrace) {
+      logger.e("Failed to parse thread history",
+          error: e, stackTrace: stackTrace);
+      return null;
+    }
   }
 
   /// Returns the ids of chats already loaded in TDLib's in-memory main list.
@@ -1607,11 +1692,12 @@ class TDLibClient {
     required int chatId,
     required String text,
     int? replyToMessageId,
+    int messageThreadId = 0,
   }) =>
       _execute({
         "@type": "setChatDraftMessage",
         "chatId": chatId,
-        "messageThreadId": 0,
+        "messageThreadId": messageThreadId,
         if (text.isNotEmpty)
           "draftMessage": {
             "@type": "draftMessage",

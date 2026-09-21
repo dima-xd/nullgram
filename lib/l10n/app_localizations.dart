@@ -98,6 +98,54 @@ abstract class AppLocalizations {
     Locale('ru'),
   ];
 
+  /// No description provided for @comments.
+  ///
+  /// In en, this message translates to:
+  /// **'Comments'**
+  String get comments;
+
+  /// No description provided for @commentsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 comment} other{{count} comments}}'**
+  String commentsCount(int count);
+
+  /// No description provided for @repliesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 reply} other{{count} replies}}'**
+  String repliesCount(int count);
+
+  /// No description provided for @leaveComment.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave a comment'**
+  String get leaveComment;
+
+  /// No description provided for @noCommentsYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No comments yet'**
+  String get noCommentsYet;
+
+  /// No description provided for @noCommentsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Be the first to comment on this post.'**
+  String get noCommentsHint;
+
+  /// No description provided for @joinDiscussion.
+  ///
+  /// In en, this message translates to:
+  /// **'Join discussion'**
+  String get joinDiscussion;
+
+  /// No description provided for @threadUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This message has no discussion.'**
+  String get threadUnavailable;
+
   /// No description provided for @passcodeSubtitle.
   ///
   /// In en, this message translates to:

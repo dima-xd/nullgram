@@ -18,6 +18,7 @@ import 'message_sticker.dart';
 import 'message_text.dart';
 import 'message_video.dart';
 import 'interaction_info.dart';
+import 'thread_button.dart';
 
 /// A single chat message.
 ///
@@ -53,6 +54,18 @@ class MessageBubble extends StatelessWidget {
   /// Called with the id of the message a reply quote points at.
   final void Function(int messageId)? onReplyTap;
 
+  /// Called when the thread footer is tapped. Null hides the footer, which is
+  /// how a thread page avoids offering a thread inside a thread.
+  final void Function(Map<String, dynamic> message)? onThreadTap;
+
+  /// Draws the message as the post a comment thread hangs off: full width,
+  /// square, no avatar, no sender label and no forward line.
+  ///
+  /// In a discussion group the post arrives as a forward from the channel, so
+  /// those three would all repeat the channel's name and make the post read as
+  /// just another comment.
+  final bool isThreadHeader;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -64,7 +77,18 @@ class MessageBubble extends StatelessWidget {
     this.onTap,
     this.onReactionTap,
     this.onReplyTap,
+    this.onThreadTap,
+    this.isThreadHeader = false,
   });
+
+  /// The message's reply info when a thread is worth offering, else null.
+  Map<String, dynamic>? _threadInfo() {
+    if (onThreadTap == null) return null;
+    final info = message['interactionInfo']?['replyInfo'];
+    if (info is! Map<String, dynamic>) return null;
+    if ((info['replyCount'] as int? ?? 0) <= 0) return null;
+    return info;
+  }
 
   /// Non-media content types rendered explicitly in the bubble's text branch.
   /// Anything outside this set (and not media or a service message) falls back
@@ -118,6 +142,7 @@ class MessageBubble extends StatelessWidget {
   /// Rounds all corners except the sender-side bottom corner of the last
   /// message in a group, which is clipped to form a tail.
   BorderRadius _bubbleRadius(bool isOutgoing) {
+    if (isThreadHeader) return BorderRadius.zero;
     const big = Radius.circular(18);
     const tail = Radius.circular(6);
     return BorderRadius.only(
@@ -148,8 +173,9 @@ class MessageBubble extends StatelessWidget {
     final isGroupChat = chatType == 'ChatTypeBasicGroup' ||
         (chatType == 'ChatTypeSupergroup' &&
             chat['type']?['isChannel'] != true);
-    final showSenderName = isGroupChat && !isOutgoing && isFirstInGroup;
-    final showAvatar = isGroupChat && !isOutgoing;
+    final showSenderName =
+        isGroupChat && !isOutgoing && isFirstInGroup && !isThreadHeader;
+    final showAvatar = isGroupChat && !isOutgoing && !isThreadHeader;
     const double avatarRadius = 16;
 
     final radius = _bubbleRadius(isOutgoing);
@@ -159,7 +185,7 @@ class MessageBubble extends StatelessWidget {
 
     final replyTo = message['replyTo'] as Map<String, dynamic>?;
     final isReply = replyTo?['@type'] == 'MessageReplyToMessage';
-    final isForward = message['forwardInfo'] != null;
+    final isForward = message['forwardInfo'] != null && !isThreadHeader;
 
     // Everything that sits above the message's own content, in Telegram's
     // order: who sent it, where it was forwarded from, what it replies to.
@@ -175,24 +201,71 @@ class MessageBubble extends StatelessWidget {
         ),
     ];
 
-    final meta = InteractionInfo(
+    final interactionInfo = InteractionInfo(
       message: message,
       isOutgoing: isOutgoing,
       lastReadOutboxMessageId:
           chat['lastReadOutboxMessageId'] as int? ?? 0,
     );
 
-    final decoration = BoxDecoration(
-      color: bubbleColor,
-      borderRadius: radius,
-      boxShadow: [
-        BoxShadow(
-          color: scheme.shadow.withValues(alpha: 0.05),
-          blurRadius: 2,
-          offset: const Offset(0, 1),
-        ),
-      ],
-      border: Border.all(color: chatColors.bubbleBorder),
+    final Widget meta = interactionInfo;
+
+    // Reactions and the thread footer belong inside the bubble, under the
+    // content: outside it they read as loose chrome floating next to the
+    // message.
+    final reactionsList =
+        message['interactionInfo']?['reactions']?['reactions'] as List?;
+    final Widget? reactionsRow =
+        (reactionsList == null || reactionsList.isEmpty)
+            ? null
+            : Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: MessageReactions(
+                  reactions: reactionsList,
+                  isOutgoing: isOutgoing,
+                  onTap: (type) => onReactionTap?.call(message, type),
+                ),
+              );
+
+    final threadInfo = _threadInfo();
+    final Widget? threadFooter = threadInfo == null
+        ? null
+        : ThreadButton(
+            replyInfo: threadInfo,
+            isChannelPost: message['isChannelPost'] == true,
+            onTap: () => onThreadTap!(message),
+          );
+
+    final decoration = isThreadHeader
+        ? BoxDecoration(
+            color: bubbleColor,
+            border: Border(
+              bottom: BorderSide(color: chatColors.bubbleBorder),
+            ),
+          )
+        : BoxDecoration(
+            color: bubbleColor,
+            borderRadius: radius,
+            boxShadow: [
+              BoxShadow(
+                color: scheme.shadow.withValues(alpha: 0.05),
+                blurRadius: 2,
+                offset: const Offset(0, 1),
+              ),
+            ],
+            border: Border.all(color: chatColors.bubbleBorder),
+          );
+
+    // Riding at the end of the text keeps a two-word message one line tall;
+    // only bubbles whose content cannot host a span fall back to a row of
+    // their own.
+    final metaSpan = WidgetSpan(
+      alignment: PlaceholderAlignment.middle,
+      baseline: TextBaseline.alphabetic,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 8),
+        child: meta,
+      ),
     );
 
     final Widget bubbleContent;
@@ -219,8 +292,16 @@ class MessageBubble extends StatelessWidget {
                     ),
                   ),
                 ClipRRect(
+                  // Anything below the media inside the bubble means the
+                  // media's bottom corners have to stay square, or the image
+                  // reads as floating above a separate strip.
                   borderRadius: prefix.isEmpty
-                      ? radius
+                      ? (reactionsRow == null && threadFooter == null
+                          ? radius
+                          : BorderRadius.only(
+                              topLeft: radius.topLeft,
+                              topRight: radius.topRight,
+                            ))
                       : BorderRadius.circular(12),
                   child: Padding(
                     padding: prefix.isEmpty
@@ -229,6 +310,12 @@ class MessageBubble extends StatelessWidget {
                     child: _buildMediaContent(content, message['id'] as int),
                   ),
                 ),
+                if (reactionsRow != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: reactionsRow,
+                  ),
+                if (threadFooter != null) threadFooter,
               ],
             ),
           ),
@@ -255,12 +342,16 @@ class MessageBubble extends StatelessWidget {
                 ),
               ),
             ClipRRect(
-              borderRadius: prefix.isEmpty
-                  ? const BorderRadius.only(
-                      topLeft: Radius.circular(18),
-                      topRight: Radius.circular(18),
-                    )
-                  : BorderRadius.circular(12),
+              // The thread header is a square full-width band, so its media
+              // must not keep the bubble's rounded shoulders.
+              borderRadius: isThreadHeader
+                  ? BorderRadius.zero
+                  : prefix.isEmpty
+                      ? const BorderRadius.only(
+                          topLeft: Radius.circular(18),
+                          topRight: Radius.circular(18),
+                        )
+                      : BorderRadius.circular(12),
               child: Padding(
                 padding: prefix.isEmpty
                     ? EdgeInsets.zero
@@ -276,11 +367,15 @@ class MessageBubble extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   MessageText(content: content['caption']),
-                  const SizedBox(height: 4),
-                  Align(alignment: Alignment.centerRight, child: meta),
+                  if (reactionsRow != null) reactionsRow,
+                  if (isLastInGroup) ...[
+                    const SizedBox(height: 4),
+                    Align(alignment: Alignment.centerRight, child: meta),
+                  ],
                 ],
               ),
             ),
+            if (threadFooter != null) threadFooter,
           ],
         ),
       );
@@ -295,7 +390,10 @@ class MessageBubble extends StatelessWidget {
             children: [
               ...prefix,
               if (contentType == 'MessageText')
-                MessageText(content: content['text']),
+                MessageText(
+                  content: content['text'],
+                  trailing: isLastInGroup ? metaSpan : null,
+                ),
               if (contentType == 'MessageLocation' ||
                   contentType == 'MessageVenue')
                 MessageLocation(content: content),
@@ -325,7 +423,15 @@ class MessageBubble extends StatelessWidget {
                         color: scheme.onSurfaceVariant,
                       ),
                 ),
-              if (isLastInGroup) ...[
+              if (reactionsRow != null) reactionsRow,
+              if (threadFooter != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: threadFooter,
+                ),
+              // Text already carries the meta inline; everything else still
+              // needs its own row for it.
+              if (isLastInGroup && contentType != 'MessageText') ...[
                 const SizedBox(height: 4),
                 Align(alignment: Alignment.centerRight, child: meta),
               ],
@@ -335,13 +441,13 @@ class MessageBubble extends StatelessWidget {
       );
     }
 
-    final reactionsList =
-        message['interactionInfo']?['reactions']?['reactions'] as List?;
     final replyMarkup = message['replyMarkup'] as Map<String, dynamic>?;
 
     final bubbleColumn = Container(
       constraints: BoxConstraints(
-        maxWidth: MediaQuery.of(context).size.width * 0.75,
+        maxWidth: isThreadHeader
+            ? double.infinity
+            : MediaQuery.of(context).size.width * 0.75,
       ),
       child: Column(
         crossAxisAlignment:
@@ -349,15 +455,6 @@ class MessageBubble extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           bubbleContent,
-          if (reactionsList != null && reactionsList.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
-              child: MessageReactions(
-                reactions: reactionsList,
-                isOutgoing: isOutgoing,
-                onTap: (type) => onReactionTap?.call(message, type),
-              ),
-            ),
           if (replyMarkup != null)
             MessageKeyboard(
               replyMarkup: replyMarkup,
@@ -368,12 +465,14 @@ class MessageBubble extends StatelessWidget {
       ),
     );
 
-    final margin = EdgeInsets.only(
-      left: 12,
-      right: 12,
-      top: isFirstInGroup ? 8 : 2,
-      bottom: 1,
-    );
+    final margin = isThreadHeader
+        ? EdgeInsets.zero
+        : EdgeInsets.only(
+            left: 12,
+            right: 12,
+            top: isFirstInGroup ? 8 : 2,
+            bottom: 1,
+          );
 
     final Widget aligned;
     if (showAvatar) {
@@ -405,10 +504,13 @@ class MessageBubble extends StatelessWidget {
         ),
       );
     } else {
-      aligned = Align(
-        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-        child: Padding(padding: margin, child: bubbleColumn),
-      );
+      aligned = isThreadHeader
+          ? bubbleColumn
+          : Align(
+              alignment:
+                  isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+              child: Padding(padding: margin, child: bubbleColumn),
+            );
     }
 
     return GestureDetector(

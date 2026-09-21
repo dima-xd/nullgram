@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/td_bytes.dart';
 import '../../chat/widgets/chat_avatar.dart';
@@ -68,15 +69,24 @@ class ChatListItem extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Flexible(
-                        child: _ChatTitle(
-                          title: chat['title'] as String? ?? 'Unknown',
-                          hasUnread: hasUnread,
-                          highlightQuery: highlightQuery,
+                      // One flexible child only: a Spacer here would be a
+                      // second one and split the free space with the title,
+                      // cutting long names in half.
+                      Expanded(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: _ChatTitle(
+                                title: chat['title'] as String? ?? 'Unknown',
+                                hasUnread: hasUnread,
+                                highlightQuery: highlightQuery,
+                              ),
+                            ),
+                            EmojiStatusBadge(chat: chat, size: 15),
+                          ],
                         ),
                       ),
-                      EmojiStatusBadge(chat: chat, size: 15),
-                      const Spacer(),
                       if (muted)
                         Padding(
                           padding: const EdgeInsets.only(left: 4),
@@ -98,7 +108,10 @@ class ChatListItem extends StatelessWidget {
                             ),
                           ),
                         Text(
-                          _formatTime(lastMessage['date'] as int),
+                          _formatTime(
+                            lastMessage['date'] as int,
+                            Localizations.localeOf(context).toLanguageTag(),
+                          ),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
@@ -206,25 +219,19 @@ class ChatListItem extends StatelessWidget {
     }
   }
 
-  String _formatTime(int timestamp) {
+  /// Today's messages show a clock, this year's a day and month, older ones a
+  /// numeric date — all in the app's locale rather than hand-rolled English.
+  String _formatTime(int timestamp, String locale) {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
     final now = DateTime.now();
 
     if (date.day == now.day &&
         date.month == now.month &&
         date.year == now.year) {
-      return '${date.hour.toString().padLeft(2, '0')}:'
-          '${date.minute.toString().padLeft(2, '0')}';
+      return DateFormat.Hm(locale).format(date);
     }
-    if (date.year == now.year) {
-      const months = [
-        '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-      ];
-      return '${date.day} ${months[date.month]}';
-    }
-    return '${date.day.toString().padLeft(2, '0')}.'
-        '${date.month.toString().padLeft(2, '0')}.${date.year % 100}';
+    if (date.year == now.year) return DateFormat.MMMd(locale).format(date);
+    return DateFormat.yMd(locale).format(date);
   }
 }
 
@@ -318,8 +325,13 @@ class _Preview extends StatelessWidget {
             chat['type']?['isChannel'] != true);
     if (!isGroup) return null;
 
-    return message['authorSignature'] as String? ??
-        _senderName(message['senderId']);
+    // TDLib sends an empty authorSignature rather than null for most group
+    // messages, which `??` would happily pass through as a bare ": ".
+    final signature = message['authorSignature'] as String?;
+    if (signature != null && signature.isNotEmpty) return signature;
+
+    final name = _senderName(message['senderId']);
+    return (name == null || name.isEmpty) ? null : name;
   }
 
   String? _senderName(dynamic senderId) {

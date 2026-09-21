@@ -1,5 +1,19 @@
 {
   "@@locale": "en",
+  "comments": "Comments",
+  "commentsCount": "{count, plural, =1{1 comment} other{{count} comments}}",
+  "@commentsCount": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "repliesCount": "{count, plural, =1{1 reply} other{{count} replies}}",
+  "@repliesCount": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "leaveComment": "Leave a comment",
+  "noCommentsYet": "No comments yet",
+  "noCommentsHint": "Be the first to comment on this post.",
+  "joinDiscussion": "Join discussion",
+  "threadUnavailable": "This message has no discussion.",
   "passcodeSubtitle": "A local lock over the app itself",
   "passcodeExplanation": "A passcode locks this app on this device. It is separate from two-step verification, which protects the account itself.",
   "twoStepSubtitle": "A password on top of the login code",

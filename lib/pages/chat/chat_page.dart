@@ -8,16 +8,15 @@ import 'package:image_picker/image_picker.dart';
 import 'package:nullgram/pages/chat/utils/albums_grouper.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/scheduled_messages_page.dart';
+import 'package:nullgram/pages/chat/thread_page.dart';
 import 'package:nullgram/pages/chat/utils/voice_recorder.dart';
-import 'package:nullgram/pages/chat/widgets/album_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/chat/widgets/chat_composer.dart';
 import 'package:nullgram/pages/chat/widgets/chat_menu.dart';
-import 'package:nullgram/pages/chat/widgets/date_separator.dart';
 import 'package:nullgram/pages/chat/widgets/emoji_status.dart';
 import 'package:nullgram/pages/chat/widgets/forward_chat_picker.dart';
-import 'package:nullgram/pages/chat/widgets/message_bubble.dart';
 import 'package:nullgram/pages/chat/widgets/message_context_menu.dart';
+import 'package:nullgram/pages/chat/widgets/message_list_view.dart';
 import 'package:nullgram/pages/chat/widgets/auto_delete_sheet.dart';
 import 'package:nullgram/pages/chat/widgets/message_info_sheet.dart';
 import 'package:nullgram/pages/chat/widgets/message_translation_sheet.dart';
@@ -27,6 +26,7 @@ import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
 import 'package:nullgram/pages/profile/chat_profile_page.dart';
 import 'package:nullgram/services/chat_store.dart';
+import 'package:nullgram/services/message_history.dart';
 import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/send_options.dart';
@@ -60,9 +60,12 @@ class _ChatPageState extends State<ChatPage> {
   final FocusNode _messageFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
 
-  final ValueNotifier<List<Map<String, dynamic>>> _messages = ValueNotifier([]);
-  final ValueNotifier<bool> _isLoading = ValueNotifier(false);
-  final ValueNotifier<bool> _hasMore = ValueNotifier(true);
+  /// The chat's history: paging, de-duplication, album grouping and update
+  /// patching all live here rather than in the page.
+  late final MessageHistoryController _history = MessageHistoryController(
+    source: ChatHistorySource(_chatId),
+  );
+
   final ValueNotifier<bool> _showScrollToBottom = ValueNotifier(false);
 
   /// The live chat object. Starts as the map the caller handed over and is kept
@@ -134,8 +137,6 @@ class _ChatPageState extends State<ChatPage> {
   /// and incoming messages stop auto-scrolling.
   static const double _stickToBottomThreshold = 320;
 
-  static const int _batchSize = 50;
-
   StreamSubscription<Map<String, dynamic>>? _messagesSubscription;
   StreamSubscription<Map<String, dynamic>>? _chatSubscription;
 
@@ -156,7 +157,7 @@ class _ChatPageState extends State<ChatPage> {
     ChatStore.instance.addListener(_syncChatFromStore);
 
     _restoreDraft();
-    _loadLocalMessages();
+    _history.loadLocal();
     _loadPinnedMessages();
     _resolveChatUser();
     _loadBotCommands();
@@ -194,9 +195,7 @@ class _ChatPageState extends State<ChatPage> {
     _messageController.dispose();
     _messageFocusNode.dispose();
     _scrollController.dispose();
-    _messages.dispose();
-    _isLoading.dispose();
-    _hasMore.dispose();
+    _history.dispose();
     _showScrollToBottom.dispose();
     _replyTo.dispose();
     _editing.dispose();
@@ -226,86 +225,23 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _onMessageUpdate(Map<String, dynamic> update) async {
     if (!mounted) return;
 
-    switch (update['@type']) {
-      case updateNewMessageConst:
-        final message = update['message'] as Map<String, dynamic>;
-        if (message['chatId'] != _chatId) return;
-        if (_containsMessageId(message['id'] as int)) return;
-        _messages.value =
-            AlbumsGrouper.groupMediaAlbums([message, ..._messages.value]);
-        _maybeStickToBottom(isOutgoing: message['isOutgoing'] == true);
-        if (message['isOutgoing'] != true) {
-          TDLibClient.viewMessages(
-            chatId: _chatId,
-            messageIds: [message['id'] as int],
-          );
-        }
+    final added = _history.applyUpdate(update);
 
-      case updateMessageSendSucceededConst:
-        // A sent message gets a brand new server-side id; swap the temporary
-        // entry out or the list would keep a ghost that no update can reach.
-        final message = update['message'] as Map<String, dynamic>;
-        if (message['chatId'] != _chatId) return;
-        _replaceMessage(update['oldMessageId'] as int, message);
-
-      case updateMessageSendFailedConst:
-        final message = update['message'] as Map<String, dynamic>;
-        if (message['chatId'] != _chatId) return;
-        _replaceMessage(update['oldMessageId'] as int, message);
-
-      case updateDeleteMessagesConst:
-        if (update['chatId'] != _chatId) return;
-        final deleted = (update['messageIds'] as List?)?.cast<int>().toSet() ??
-            const <int>{};
-        if (deleted.isEmpty) return;
-        _messages.value = [
-          for (final entry in _messages.value)
-            if (entry['isAlbum'] == true)
-              {
-                ...entry,
-                'messages': <Map<String, dynamic>>[
-                  for (final member in AlbumsGrouper.membersOf(entry))
-                    if (!deleted.contains(member['id'])) member,
-                ],
-              }
-            else if (!deleted.contains(entry['id']))
-              entry,
-        ].where((entry) {
-          if (entry['isAlbum'] != true) return true;
-          return (entry['messages'] as List).isNotEmpty;
-        }).toList();
-
-      case updateMessageInteractionInfoConst:
-        if (update['chatId'] != _chatId) return;
-        _patchMessage(
-          update['messageId'] as int,
-          (message) => {
-            ...message,
-            'interactionInfo': update['interactionInfo'],
-          },
+    if (added != null) {
+      _maybeStickToBottom(isOutgoing: added['isOutgoing'] == true);
+      if (added['isOutgoing'] != true) {
+        TDLibClient.viewMessages(
+          chatId: _chatId,
+          messageIds: [added['id'] as int],
         );
+      }
+    }
 
-      case updateMessageContentConst:
-        if (update['chatId'] != _chatId) return;
-        _patchMessage(
-          update['messageId'] as int,
-          (message) => {...message, 'content': update['newContent']},
-        );
-
-      case updateMessageEditedConst:
-        if (update['chatId'] != _chatId) return;
-        _patchMessage(
-          update['messageId'] as int,
-          (message) => {...message, 'editDate': update['editDate']},
-        );
-
-      case updateMessageIsPinnedConst:
-        if (update['chatId'] != _chatId) return;
-        _patchMessage(
-          update['messageId'] as int,
-          (message) => {...message, 'isPinned': update['isPinned']},
-        );
-        _loadPinnedMessages();
+    // The pin banner reads a separate search, so it is refreshed here rather
+    // than from the history list.
+    if (update['@type'] == updateMessageIsPinnedConst &&
+        update['chatId'] == _chatId) {
+      _loadPinnedMessages();
     }
   }
 
@@ -474,27 +410,6 @@ class _ChatPageState extends State<ChatPage> {
   // Message list bookkeeping
   // ---------------------------------------------------------------------------
 
-  /// A stable per-sender key used to group consecutive messages. Albums never
-  /// group with anything, so each gets a unique key.
-  String _senderKey(Map<String, dynamic> message) {
-    if (message['isAlbum'] == true) return 'album_${message['id']}';
-    final sender = message['senderId'];
-    final id = sender?['userId'] ?? sender?['chatId'];
-    if (id != null) return 'id_$id';
-    return message['isOutgoing'] == true ? 'me' : 'other';
-  }
-
-  /// Two messages belong to the same group if from the same sender and sent
-  /// within five minutes of each other.
-  bool _sameGroup(Map<String, dynamic>? a, Map<String, dynamic>? b) {
-    if (a == null || b == null) return false;
-    if (a['isAlbum'] == true || b['isAlbum'] == true) return false;
-    if (_senderKey(a) != _senderKey(b)) return false;
-    final da = a['date'] as int? ?? 0;
-    final db = b['date'] as int? ?? 0;
-    return (da - db).abs() <= 300;
-  }
-
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     final show = _scrollController.offset > _stickToBottomThreshold;
@@ -519,62 +434,6 @@ class _ChatPageState extends State<ChatPage> {
         _scrollToBottom();
       }
     });
-  }
-
-  /// Whether a message with [id] is already shown, checking both standalone
-  /// messages and members grouped inside album entries.
-  bool _containsMessageId(int id) {
-    for (final entry in _messages.value) {
-      if (entry['isAlbum'] == true) {
-        if (AlbumsGrouper.membersOf(entry)
-            .any((member) => member['id'] == id)) {
-          return true;
-        }
-      } else if (entry['id'] == id) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Drops any incoming messages already present, so overlapping history loads
-  /// or a live update racing a load can't introduce duplicates.
-  List<Map<String, dynamic>> _withoutDuplicates(
-    List<Map<String, dynamic>> incoming,
-  ) =>
-      incoming.where((m) => !_containsMessageId(m['id'] as int)).toList();
-
-  /// Applies [transform] to the message with [messageId], whether standalone or
-  /// grouped inside an album, then refreshes the list.
-  void _patchMessage(
-    int messageId,
-    Map<String, dynamic> Function(Map<String, dynamic> message) transform,
-  ) {
-    var changed = false;
-    final updated = _messages.value.map((entry) {
-      if (entry['isAlbum'] == true) {
-        final members = AlbumsGrouper.membersOf(entry);
-        final index =
-            members.indexWhere((member) => member['id'] == messageId);
-        if (index == -1) return entry;
-        members[index] = transform(members[index]);
-        changed = true;
-        return {...entry, 'messages': members};
-      }
-      if (entry['id'] == messageId) {
-        changed = true;
-        return transform(entry);
-      }
-      return entry;
-    }).toList();
-
-    if (changed) _messages.value = updated;
-  }
-
-  /// Swaps the message with [oldMessageId] for [message], which carries a new
-  /// id after the server accepted (or rejected) the send.
-  void _replaceMessage(int oldMessageId, Map<String, dynamic> message) {
-    _patchMessage(oldMessageId, (_) => message);
   }
 
   // ---------------------------------------------------------------------------
@@ -872,7 +731,7 @@ class _ChatPageState extends State<ChatPage> {
   List<Map<String, dynamic>> _selectedMessages() {
     final selected = _selection.value ?? const {};
     final result = <Map<String, dynamic>>[];
-    for (final entry in _messages.value) {
+    for (final entry in _history.messages) {
       if (entry['isAlbum'] == true) {
         for (final member in AlbumsGrouper.membersOf(entry)) {
           if (selected.contains(member['id'])) result.add(member);
@@ -917,36 +776,49 @@ class _ChatPageState extends State<ChatPage> {
     _searchResults.value = result?.messages ?? const [];
   }
 
+  /// Opens the thread of [message].
+  ///
+  /// TDLib answers with the thread's own chat, which for a channel post is the
+  /// linked discussion supergroup, so that chat is resolved before pushing.
+  Future<void> _openThread(Map<String, dynamic> message) async {
+    final info = await TDLibClient.getMessageThread(
+      chatId: _chatId,
+      messageId: message['id'] as int,
+    );
+    if (!mounted) return;
+
+    if (info == null) {
+      _toast(context.l10n.threadUnavailable);
+      return;
+    }
+
+    final chat = await TDLibClient.getChat(chatId: info['chatId'] as int);
+    if (!mounted || chat == null) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ThreadPage(chat: chat, threadInfo: info),
+      ),
+    );
+  }
+
   /// Reloads the history window around [messageId] so a search hit becomes
   /// visible, then scrolls to it. Replaces the current message list rather than
   /// scrolling the lazy one, since older messages may not be loaded yet.
   Future<void> _jumpToMessage(int messageId) async {
     _closeSearch();
-    _isLoading.value = true;
-
-    final window = await TDLibClient.getChatHistory(
-      chatId: _chatId,
-      fromMessageId: messageId,
-      offset: -25,
-      limit: 50,
-      onlyLocal: false,
-    );
-
+    await _history.loadWindowAround(messageId);
     if (!mounted) return;
 
-    final messages = window?.messages ?? const <Map<String, dynamic>>[];
-    _messages.value = AlbumsGrouper.groupMediaAlbums([...messages]);
-    _hasMore.value = true;
-    _isLoading.value = false;
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients || _messages.value.isEmpty) return;
-      final index = _messages.value.indexWhere((m) => m['id'] == messageId);
+      if (!_scrollController.hasClients || _history.messages.isEmpty) return;
+      final index = _history.messages.indexWhere((m) => m['id'] == messageId);
       if (index < 0) return;
       final position = _scrollController.position;
       // The list is lazily built, so real item extents aren't known; an
       // average is close enough to bring the target on screen.
-      final itemHeight = position.maxScrollExtent / _messages.value.length;
+      final itemHeight = position.maxScrollExtent / _history.messages.length;
       _scrollController.jumpTo(
         (index * itemHeight).clamp(0.0, position.maxScrollExtent),
       );
@@ -961,78 +833,6 @@ class _ChatPageState extends State<ChatPage> {
     );
     if (!mounted) return;
     _pinnedMessages.value = result?.messages ?? const [];
-  }
-
-  // ---------------------------------------------------------------------------
-  // History loading
-  // ---------------------------------------------------------------------------
-
-  Future<void> _loadLocalMessages() async {
-    try {
-      while (true) {
-        if (!mounted) return;
-        _isLoading.value = true;
-        final fromId =
-            _messages.value.isEmpty ? 0 : _messages.value.last['id'] as int;
-
-        final localMessages = await TDLibClient.getChatHistory(
-          chatId: _chatId,
-          fromMessageId: fromId,
-          offset: 0,
-          limit: _batchSize * 2,
-          onlyLocal: true,
-        );
-
-        if (!mounted) return;
-
-        final fresh = localMessages == null
-            ? const <Map<String, dynamic>>[]
-            : _withoutDuplicates(localMessages.messages);
-
-        if (fresh.isEmpty) break;
-        _messages.value = AlbumsGrouper.groupMediaAlbums(
-          [..._messages.value, ...fresh],
-        );
-      }
-    } catch (e) {
-      logger.e('Error loading initial messages: $e');
-    }
-    if (!mounted) return;
-    _isLoading.value = false;
-  }
-
-  Future<void> _loadBatch() async {
-    if (_isLoading.value || !_hasMore.value) return;
-    _isLoading.value = true;
-
-    final fromId =
-        _messages.value.isEmpty ? 0 : _messages.value.last['id'] as int;
-
-    final messages = await TDLibClient.getChatHistory(
-      chatId: _chatId,
-      fromMessageId: fromId,
-      offset: 0,
-      limit: _batchSize * 2,
-      onlyLocal: false,
-    );
-
-    if (!mounted) return;
-
-    if (messages == null || messages.messages.isEmpty) {
-      _hasMore.value = false;
-      _isLoading.value = false;
-      return;
-    }
-
-    final fresh = _withoutDuplicates(messages.messages);
-    if (fresh.isEmpty) {
-      _isLoading.value = false;
-      return;
-    }
-
-    _messages.value =
-        AlbumsGrouper.groupMediaAlbums([..._messages.value, ...fresh]);
-    _isLoading.value = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -1491,6 +1291,8 @@ class _ChatPageState extends State<ChatPage> {
         _openProfile();
       case ChatMenuAction.search:
         _openSearch();
+      case ChatMenuAction.videoCall:
+        await _startVideoCall();
       case ChatMenuAction.selectMessages:
         _selection.value = const {};
       case ChatMenuAction.autoDelete:
@@ -1510,7 +1312,7 @@ class _ChatPageState extends State<ChatPage> {
       case ChatMenuAction.clearHistory:
         if (await _confirm('Clear history?', 'Clear')) {
           await TDLibClient.deleteChatHistory(chatId: _chatId);
-          if (mounted) _messages.value = [];
+          if (mounted) _history.clear();
         }
       case ChatMenuAction.toggleBlock:
         final userId = _chatUserId();
@@ -1595,7 +1397,20 @@ class _ChatPageState extends State<ChatPage> {
                 Expanded(
                   child: Stack(
                     children: [
-                      _buildMessageList(selection),
+                      MessageListView(
+                        history: _history,
+                        chat: _chat.value,
+                        scrollController: _scrollController,
+                        selection: selection,
+                        lastReadOnOpen: _lastReadOnOpen,
+                        callbacks: MessageListCallbacks(
+                          onLongPress: _onMessageLongPress,
+                          onTap: _toggleSelected,
+                          onReactionTap: _toggleReaction,
+                          onReplyTap: _jumpToMessage,
+                          onThreadTap: _openThread,
+                        ),
+                      ),
                       Positioned(
                         right: 12,
                         bottom: 12,
@@ -1655,24 +1470,16 @@ class _ChatPageState extends State<ChatPage> {
           return AppBar(
             titleSpacing: 0,
             title: _buildHeader(),
+            // Two actions at most: every further icon eats the title, which
+            // on a phone leaves names and statuses truncated mid-word. Search
+            // and the video call live in the overflow menu instead.
             actions: [
-              IconButton(
-                icon: const Icon(Icons.search),
-                tooltip: context.l10n.searchInChat,
-                onPressed: _openSearch,
-              ),
-              if (_chatUserId() != null) ...[
-                IconButton(
-                  icon: const Icon(Icons.videocam),
-                  tooltip: context.l10n.videoCall,
-                  onPressed: _startVideoCall,
-                ),
+              if (_chatUserId() != null)
                 IconButton(
                   icon: const Icon(Icons.call),
                   tooltip: context.l10n.call,
                   onPressed: _startVoiceCall,
                 ),
-              ],
               IconButton(
                 icon: const Icon(Icons.more_vert),
                 tooltip: context.l10n.more,
@@ -1880,136 +1687,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Widget _buildMessageList(Set<int>? selection) {
-    return ValueListenableBuilder<List<Map<String, dynamic>>>(
-      valueListenable: _messages,
-      builder: (context, messages, child) {
-        return ValueListenableBuilder<bool>(
-          valueListenable: _isLoading,
-          builder: (context, isLoading, child) {
-            if (messages.isEmpty && !isLoading) {
-              return EmptyState(
-                icon: Icons.forum_outlined,
-                title: context.l10n.noMessagesYet,
-                subtitle: context.l10n.chatEmptyHint,
-                lottieAsset: 'assets/lottie/empty.json',
-              );
-            }
-
-            return ListView.builder(
-              controller: _scrollController,
-              reverse: true,
-              itemCount: messages.length + (isLoading ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (isLoading && index == messages.length) {
-                  return const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  );
-                }
-
-                final message = messages[index];
-
-                // Prefetch older history well before the user reaches the end.
-                if (index >= messages.length - 20 &&
-                    !isLoading &&
-                    _hasMore.value) {
-                  WidgetsBinding.instance
-                      .addPostFrameCallback((_) => _loadBatch());
-                }
-
-                // In a reverse list, lower indices are newer. "Older" sits
-                // above (next index), "newer" below (previous index).
-                final older =
-                    index + 1 < messages.length ? messages[index + 1] : null;
-                final newer = index - 1 >= 0 ? messages[index - 1] : null;
-
-                final bubble = _buildBubble(
-                  message: message,
-                  isFirstInGroup: !_sameGroup(message, older),
-                  isLastInGroup: !_sameGroup(message, newer),
-                  selection: selection,
-                );
-
-                final showDateSeparator = older == null ||
-                    !MessageFormatter.isSameDay(
-                      message['date'] as int,
-                      older['date'] as int,
-                    );
-                final showUnreadDivider = _isFirstUnread(message, older);
-                if (!showDateSeparator && !showUnreadDivider) {
-                  return bubble;
-                }
-
-                return Column(
-                  children: [
-                    if (showDateSeparator)
-                      DateSeparator(
-                        label: MessageFormatter.formatDateSeparator(
-                          message['date'] as int,
-                        ),
-                      ),
-                    if (showUnreadDivider) const _UnreadDivider(),
-                    bubble,
-                  ],
-                );
-              },
-            );
-          },
-        );
-      },
-    );
-  }
-
-  /// Whether [message] is the oldest one the user had not read when the chat
-  /// was opened, which is where the unread divider belongs.
-  bool _isFirstUnread(
-    Map<String, dynamic> message,
-    Map<String, dynamic>? older,
-  ) {
-    if (_lastReadOnOpen == 0) return false;
-    if (message['isOutgoing'] == true) return false;
-    final id = message['id'] as int? ?? 0;
-    if (id <= _lastReadOnOpen) return false;
-    return older == null || (older['id'] as int? ?? 0) <= _lastReadOnOpen;
-  }
-
-  Widget _buildBubble({
-    required Map<String, dynamic> message,
-    required bool isFirstInGroup,
-    required bool isLastInGroup,
-    required Set<int>? selection,
-  }) {
-    final chat = _chat.value;
-
-    if (message['isAlbum'] == true) {
-      return AlbumBubble(
-        albumMessages: AlbumsGrouper.membersOf(message),
-        chat: chat,
-        onLongPress: _onMessageLongPress,
-        onReactionTap: _toggleReaction,
-      );
-    }
-
-    return MessageBubble(
-      message: message,
-      chat: chat,
-      isFirstInGroup: isFirstInGroup,
-      isLastInGroup: isLastInGroup,
-      isSelected: selection?.contains(message['id']) ?? false,
-      onLongPress: _onMessageLongPress,
-      onTap: selection == null ? null : _toggleSelected,
-      onReactionTap: _toggleReaction,
-      onReplyTap: _jumpToMessage,
-    );
-  }
-
   /// A banner under the app bar showing the most recent pinned message; tapping
   /// it jumps to that message. Hidden when nothing is pinned.
   Widget _buildPinnedBanner() {
@@ -2133,25 +1810,3 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-/// The "Unread messages" rule marking where the user left off.
-class _UnreadDivider extends StatelessWidget {
-  const _UnreadDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      color: scheme.primaryContainer,
-      child: Center(
-        child: Text(
-          context.l10n.unreadMessages,
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: scheme.onPrimaryContainer,
-              ),
-        ),
-      ),
-    );
-  }
-}

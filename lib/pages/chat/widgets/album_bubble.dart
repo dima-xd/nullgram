@@ -93,18 +93,27 @@ class _AlbumBubbleState extends State<AlbumBubble> {
 
   /// Reaction chips for the album, keyed off its first message (the one that
   /// carries the album's reactions in TDLib). Empty when there are none.
+  ///
+  /// Drawn inside the bubble, like every other message's reactions; outside it
+  /// they read as chips floating loose beside the album.
   Widget _reactionsRow(Map<String, dynamic> message, bool isOutgoing) {
     final reactions =
         message['interactionInfo']?['reactions']?['reactions'] as List?;
     if (reactions == null || reactions.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.only(top: 4, left: 8, right: 8),
+      padding: const EdgeInsets.only(top: 6),
       child: MessageReactions(
         reactions: reactions,
         isOutgoing: isOutgoing,
         onTap: (type) => widget.onReactionTap?.call(message, type),
       ),
     );
+  }
+
+  bool _hasReactions(Map<String, dynamic> message) {
+    final reactions =
+        message['interactionInfo']?['reactions']?['reactions'] as List?;
+    return reactions != null && reactions.isNotEmpty;
   }
 
   @override
@@ -220,6 +229,7 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             MessageText(content: firstContent['caption']),
+                            _reactionsRow(firstMessage, isOutgoing),
                             const SizedBox(height: 4),
                             Align(
                               alignment: Alignment.centerRight,
@@ -235,7 +245,6 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                   ),
                 ),
               ),
-              _reactionsRow(firstMessage, isOutgoing),
             ],
           ),
         ),
@@ -283,6 +292,11 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                       ),
                     ),
                   buildGrid(),
+                  if (_hasReactions(firstMessage))
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                      child: _reactionsRow(firstMessage, isOutgoing),
+                    ),
                 ],
               ),
             ),
@@ -296,7 +310,6 @@ class _AlbumBubbleState extends State<AlbumBubble> {
                 ),
               ),
             ),
-            _reactionsRow(firstMessage, isOutgoing),
           ],
         ),
       ),

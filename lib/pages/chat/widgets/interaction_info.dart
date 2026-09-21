@@ -54,10 +54,7 @@ class InteractionInfo extends StatelessWidget {
         ],
         if (hasViews || hasForwards) const SizedBox(width: 12),
         if ((message['editDate'] as int? ?? 0) > 0) ...[
-          Text(
-            'edited',
-            style: metaStyle?.copyWith(fontStyle: FontStyle.italic),
-          ),
+          Icon(Icons.edit, size: 12, color: scheme.onSurfaceVariant),
           const SizedBox(width: 4),
         ],
         Text(MessageFormatter.formatTime(message['date']!), style: metaStyle),
