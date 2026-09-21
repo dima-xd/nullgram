@@ -3,10 +3,11 @@ import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/settings/two_step_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/pages/settings/passcode_page.dart';
+import 'package:nullgram/pages/settings/privacy_rules.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
 import 'package:nullgram/l10n/l10n.dart';
 
-/// Privacy and security: the blocked-senders list.
+/// Privacy and security: the per-setting rules and the blocked senders.
 class PrivacyPage extends StatefulWidget {
   const PrivacyPage({super.key});
 
@@ -97,6 +98,16 @@ class _PrivacyPageState extends State<PrivacyPage> {
               MaterialPageRoute(builder: (context) => const TwoStepPage()),
             ),
           ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+            child: Text(
+              context.l10n.privacy,
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(color: theme.colorScheme.primary),
+            ),
+          ),
+          for (final rule in privacyRules()) PrivacyRuleTile(rule: rule),
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),

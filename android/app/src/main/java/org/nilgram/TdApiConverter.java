@@ -1,4 +1,4 @@
-package org.nullgram;
+package org.nilgram;
 
 import org.drinkless.tdlib.TdApi;
 import org.json.JSONObject;

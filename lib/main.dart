@@ -16,6 +16,7 @@ import 'package:nullgram/services/language_service.dart';
 import 'package:nullgram/pages/passcode/passcode_lock_screen.dart';
 import 'package:nullgram/services/passcode_service.dart';
 import 'package:nullgram/services/push_service.dart';
+import 'package:nullgram/services/share_intents.dart';
 import 'package:nullgram/services/tdlib_bootstrap.dart';
 import 'package:nullgram/services/notification_service.dart';
 import 'package:nullgram/services/call_service.dart';
@@ -175,6 +176,10 @@ void main() async {
   // waits for either. It does need the TDLib parameters, which are in place by
   // now.
   unawaited(AutoDownloadService.instance.init());
+
+  // After the first frame: a shared file or a tapped t.me link needs a
+  // navigator to land on.
+  unawaited(ShareIntents.instance.start());
 }
 
 class MyApp extends StatefulWidget {

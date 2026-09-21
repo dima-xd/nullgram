@@ -4,7 +4,7 @@ import 'package:nullgram/pages/home/widgets/chat_list_view.dart';
 import 'package:nullgram/pages/home/widgets/connection_banner.dart';
 import 'package:nullgram/pages/home/widgets/new_chat_sheet.dart';
 import 'package:nullgram/services/chat_store.dart';
-import '../chat/chat_page.dart';
+import '../chat/chat_route.dart';
 import '../search/search_page.dart';
 import 'menu.dart';
 import 'package:nullgram/l10n/l10n.dart';
@@ -170,7 +170,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (chat == null) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+      chatRoute(chat),
     );
   }
 }

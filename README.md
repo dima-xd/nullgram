@@ -22,6 +22,7 @@ where the focus is on **simplicity, and functionality** - not monetization.
 
 **Chats**
 - Chat list with folders, archive, pinning, muting, mark as read/unread
+- Creating, editing, reordering and deleting chat folders
 - Unread counters, mention badges, draft previews, delivery/read ticks
 - Live typing indicators, connection status, unread divider in history
 
@@ -33,12 +34,16 @@ where the focus is on **simplicity, and functionality** - not monetization.
 - Voice messages: hold to record, slide to cancel, real waveforms
 - Round video messages, and fullscreen playback for every video
 - Stickers, including animated (TGS), plus saved GIFs
+- Sticker packs: installed, trending and search, with one-tap install
+- Sticker search by emoji and GIF search through Telegram's inline bot
 - Custom (premium) emoji in text, reactions and emoji statuses
 - Silent send, "send when online" and scheduled messages
 - Bot inline keyboards, callback buttons and the bot's command menu
 - Per-chat message search, shared-media browser, jump-to-message
+- Link previews, with the site name, title, description and image
 - Message translation, reaction and read-receipt lists
 - Per-chat auto-delete timer
+- Channel comment threads and forum topics
 
 **People and groups**
 - Sign-up for a new phone number, including the Terms of Service
@@ -47,6 +52,8 @@ where the focus is on **simplicity, and functionality** - not monetization.
 - Secret (end-to-end encrypted) chats
 - Profiles with bio, username, phone, shared actions and blocking
 - Global search across chats, public chats and message text
+- Opens `t.me` and `tg://` links from other apps, and accepts text, photos,
+  videos and files shared into it
 
 **Calls**
 - 1:1 voice and video calls, plus a call log
@@ -60,6 +67,8 @@ where the focus is on **simplicity, and functionality** - not monetization.
 - Material You theming, light/dark/AMOLED
 - Interface language (English and Russian), which also moves TDLib's own
   language pack
+- Privacy rules for last seen, profile photo, bio, phone number, forwards,
+  calls, group invites and voice messages
 - Passcode lock with biometric unlock and an auto-lock delay
 - MTProto/SOCKS5/HTTP proxies, with ping and `t.me/proxy` link import
 - Automatic media download limits per connection, mobile data and Wi-Fi
@@ -69,15 +78,16 @@ where the focus is on **simplicity, and functionality** - not monetization.
 ---
 
 ## 📝 Not implemented yet
-- [ ] Forum topics
-- [ ] Creating and editing chat folders (existing folders are shown)
-- [ ] Sticker pack browsing and installing
 - [ ] Group voice and video chats
-- [ ] Live location sharing
+- [ ] Live location sharing and maps in location messages
 - [ ] Custom chat wallpapers
-- [ ] Channel comment threads
-- [ ] Inline bot queries (`@bot query`)
+- [ ] Inline bot queries in the composer (`@bot query`); GIF search already
+      uses them
 - [ ] Stories
+- [ ] Group and channel administration beyond members: permissions, slow mode,
+      the event log, join requests, statistics, reporting
+- [ ] Editing a caption or replacing the media of a sent message
+- [ ] Invoices, games, paid media and gifts, which show as unsupported
 
 Roaming is not a separate automatic-download profile: nothing in the plugin
 layer distinguishes it from ordinary mobile data.

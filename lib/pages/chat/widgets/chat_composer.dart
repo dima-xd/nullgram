@@ -21,8 +21,10 @@ class ChatComposer extends StatefulWidget {
     required this.onSend,
     required this.onSendOptions,
     required this.onVoice,
+    required this.chatId,
     required this.onSticker,
     required this.onGif,
+    required this.onInlineGif,
     required this.onAttach,
     required this.onFormat,
     required this.onInsertLink,
@@ -50,10 +52,16 @@ class ChatComposer extends StatefulWidget {
   /// too short to send.
   final void Function(VoiceRecording? recording) onVoice;
 
+  /// The chat being composed for, which the GIF search is scoped to.
+  final int chatId;
+
   final void Function(int fileId) onSticker;
 
   /// Called with the file id of the saved GIF to send.
   final void Function(int fileId) onGif;
+
+  /// Called with a GIF an inline bot returned, sent by query id.
+  final void Function(int queryId, String resultId) onInlineGif;
   final VoidCallback onAttach;
 
   /// Wraps the current selection in MarkdownV2 markers.
@@ -245,9 +253,11 @@ class _ChatComposerState extends State<ChatComposer> {
               alignment: Alignment.topCenter,
               child: show
                   ? EmojiPanel(
+                      chatId: widget.chatId,
                       onEmoji: _insertEmoji,
                       onSticker: widget.onSticker,
                       onGif: widget.onGif,
+                      onInlineGif: widget.onInlineGif,
                       onBackspace: _backspace,
                     )
                   : const SizedBox.shrink(),

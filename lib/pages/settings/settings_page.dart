@@ -3,6 +3,7 @@ import 'package:nullgram/app_info.dart';
 import 'package:nullgram/main.dart' show themeModeNotifier, amoledNotifier;
 import 'package:nullgram/pages/settings/notifications_page.dart';
 import 'package:nullgram/pages/settings/auto_download_page.dart';
+import 'package:nullgram/pages/settings/chat_folders_page.dart';
 import 'package:nullgram/pages/settings/proxy_page.dart';
 import 'package:nullgram/services/language_service.dart';
 import 'package:nullgram/pages/settings/privacy_page.dart';
@@ -52,6 +53,11 @@ class SettingsPage extends StatelessWidget {
             icon: Icons.notifications_outlined,
             title: context.l10n.notificationsAndSounds,
             page: () => const NotificationsPage(),
+          ),
+          _NavigationTile(
+            icon: Icons.folder_outlined,
+            title: context.l10n.chatFolders,
+            page: () => const ChatFoldersPage(),
           ),
           _NavigationTile(
             icon: Icons.lock_outline,

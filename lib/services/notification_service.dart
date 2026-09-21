@@ -6,7 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:logger/logger.dart';
 import 'package:nullgram/l10n/app_localizations.dart';
 import 'package:nullgram/main.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/services/account_manager.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/services/language_service.dart';
@@ -451,7 +451,7 @@ class NotificationService {
         await TDLibClient.getChat(chatId: chatId);
     if (chat == null) return;
     navigatorKey.currentState?.push(
-      MaterialPageRoute(builder: (_) => ChatPage(chat: chat)),
+      chatRoute(chat),
     );
   }
 }

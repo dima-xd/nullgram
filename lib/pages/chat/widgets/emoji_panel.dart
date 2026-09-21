@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:nullgram/pages/chat/sticker_sets_page.dart';
+import 'package:nullgram/services/gif_search.dart';
 import 'package:nullgram/tdlib/constants.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'sticker_image.dart';
@@ -15,11 +17,16 @@ import 'package:nullgram/l10n/l10n.dart';
 class EmojiPanel extends StatefulWidget {
   const EmojiPanel({
     super.key,
+    required this.chatId,
     required this.onEmoji,
     required this.onSticker,
     required this.onGif,
+    required this.onInlineGif,
     required this.onBackspace,
   });
+
+  /// The chat the picker sends into, which an inline GIF query is scoped to.
+  final int chatId;
 
   /// Called with the emoji to insert at the caret.
   final void Function(String emoji) onEmoji;
@@ -29,6 +36,9 @@ class EmojiPanel extends StatefulWidget {
 
   /// Called with the file id of the saved GIF to send.
   final void Function(int fileId) onGif;
+
+  /// Called with a GIF an inline bot returned, which is sent by query id.
+  final void Function(int queryId, String resultId) onInlineGif;
 
   /// Called when the panel's backspace key is pressed.
   final VoidCallback onBackspace;
@@ -79,7 +89,11 @@ class _EmojiPanelState extends State<EmojiPanel>
                   onBackspace: widget.onBackspace,
                 ),
                 _StickerGrid(onSticker: widget.onSticker),
-                _GifGrid(onGif: widget.onGif),
+                _GifGrid(
+                  chatId: widget.chatId,
+                  onGif: widget.onGif,
+                  onInlineGif: widget.onInlineGif,
+                ),
               ],
             ),
           ),
@@ -149,6 +163,7 @@ class _StickerGridState extends State<_StickerGrid> {
   final ValueNotifier<List<Map<String, dynamic>>> _stickers =
       ValueNotifier(const []);
   final ValueNotifier<bool> _isLoading = ValueNotifier(true);
+  final TextEditingController _query = TextEditingController();
 
   @override
   void initState() {
@@ -160,6 +175,7 @@ class _StickerGridState extends State<_StickerGrid> {
   void dispose() {
     _stickers.dispose();
     _isLoading.dispose();
+    _query.dispose();
     super.dispose();
   }
 
@@ -197,56 +213,113 @@ class _StickerGridState extends State<_StickerGrid> {
     if (mounted) _isLoading.value = false;
   }
 
+  /// Replaces the grid with the stickers matching [emoji], or restores the
+  /// installed ones when the box is cleared.
+  Future<void> _search(String emoji) async {
+    final query = emoji.trim();
+    if (query.isEmpty) {
+      _isLoading.value = true;
+      _stickers.value = const [];
+      await _load();
+      return;
+    }
+    _isLoading.value = true;
+    final found = await TDLibClient.getStickersByEmoji(emoji: query);
+    if (!mounted) return;
+    _stickers.value = found;
+    _isLoading.value = false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<List<Map<String, dynamic>>>(
-      valueListenable: _stickers,
-      builder: (context, stickers, child) {
-        if (stickers.isEmpty) {
-          return ValueListenableBuilder<bool>(
-            valueListenable: _isLoading,
-            builder: (context, isLoading, child) => Center(
-              child: isLoading
-                  ? const CircularProgressIndicator()
-                  : Text(
-                      context.l10n.noStickersYet,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-            ),
-          );
-        }
-
-        return GridView.builder(
-          padding: const EdgeInsets.all(8),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 76,
-          ),
-          itemCount: stickers.length,
-          itemBuilder: (context, index) {
-            final sticker = stickers[index];
-            return InkWell(
-              onTap: () {
-                final fileId = sticker['sticker']?['id'] as int?;
-                if (fileId != null) widget.onSticker(fileId);
-              },
-              child: StickerImage(
-                sticker: sticker,
-                size: 64,
-                animate: false,
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 4, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _query,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: _search,
+                  decoration: InputDecoration(
+                    hintText: context.l10n.searchStickersHint,
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
               ),
-            );
-          },
-        );
-      },
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline),
+                tooltip: context.l10n.stickerPacks,
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const StickerSetsPage()),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+            valueListenable: _stickers,
+            builder: (context, stickers, child) {
+              if (stickers.isEmpty) {
+                return ValueListenableBuilder<bool>(
+                  valueListenable: _isLoading,
+                  builder: (context, isLoading, child) => Center(
+                    child: isLoading
+                        ? const CircularProgressIndicator()
+                        : Text(
+                            context.l10n.noStickersYet,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                  ),
+                );
+              }
+
+              return GridView.builder(
+                padding: const EdgeInsets.all(8),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 76,
+                ),
+                itemCount: stickers.length,
+                itemBuilder: (context, index) {
+                  final sticker = stickers[index];
+                  return InkWell(
+                    onTap: () {
+                      final fileId = sticker['sticker']?['id'] as int?;
+                      if (fileId != null) widget.onSticker(fileId);
+                    },
+                    child: StickerImage(
+                      sticker: sticker,
+                      size: 64,
+                      animate: false,
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
 
-/// A grid of the user's saved GIFs.
+/// A grid of the user's saved GIFs, or of what the GIF bot returns.
 class _GifGrid extends StatefulWidget {
-  const _GifGrid({required this.onGif});
+  const _GifGrid({
+    required this.chatId,
+    required this.onGif,
+    required this.onInlineGif,
+  });
 
+  final int chatId;
   final void Function(int fileId) onGif;
+  final void Function(int queryId, String resultId) onInlineGif;
 
   @override
   State<_GifGrid> createState() => _GifGridState();
@@ -255,7 +328,9 @@ class _GifGrid extends StatefulWidget {
 class _GifGridState extends State<_GifGrid> {
   final ValueNotifier<List<Map<String, dynamic>>> _animations =
       ValueNotifier(const []);
+  final ValueNotifier<List<GifResult>> _results = ValueNotifier(const []);
   final ValueNotifier<bool> _isLoading = ValueNotifier(true);
+  final TextEditingController _query = TextEditingController();
 
   @override
   void initState() {
@@ -266,8 +341,34 @@ class _GifGridState extends State<_GifGrid> {
   @override
   void dispose() {
     _animations.dispose();
+    _results.dispose();
     _isLoading.dispose();
+    _query.dispose();
     super.dispose();
+  }
+
+  /// Runs a GIF search, or drops back to the saved GIFs on an empty box.
+  Future<void> _search(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      _results.value = const [];
+      return;
+    }
+    _isLoading.value = true;
+    final results = await GifSearch.search(
+      chatId: widget.chatId,
+      query: trimmed,
+    );
+    if (!mounted) return;
+    _results.value = results;
+    _isLoading.value = false;
+
+    for (final result in results) {
+      final thumbnailId = result.animation['thumbnail']?['file']?['id'] as int?;
+      if (thumbnailId != null) {
+        TDLibClient.downloadFile(fileId: thumbnailId).catchError((_) {});
+      }
+    }
   }
 
   Future<void> _load() async {
@@ -288,40 +389,87 @@ class _GifGridState extends State<_GifGrid> {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<List<Map<String, dynamic>>>(
-      valueListenable: _animations,
-      builder: (context, animations, child) {
-        if (animations.isEmpty) {
-          return ValueListenableBuilder<bool>(
-            valueListenable: _isLoading,
-            builder: (context, isLoading, child) => Center(
-              child: isLoading
-                  ? const CircularProgressIndicator()
-                  : Text(
-                      context.l10n.noSavedGifs,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+          child: TextField(
+            controller: _query,
+            textInputAction: TextInputAction.search,
+            onSubmitted: _search,
+            decoration: InputDecoration(
+              hintText: context.l10n.searchGifsHint,
+              prefixIcon: const Icon(Icons.search, size: 20),
+              border: const OutlineInputBorder(),
+              isDense: true,
             ),
-          );
-        }
-
-        return GridView.builder(
-          padding: const EdgeInsets.all(4),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 120,
-            crossAxisSpacing: 4,
-            mainAxisSpacing: 4,
           ),
-          itemCount: animations.length,
-          itemBuilder: (context, index) => _GifTile(
-            animation: animations[index],
-            onTap: () {
-              final fileId = animations[index]['animation']?['id'] as int?;
-              if (fileId != null) widget.onGif(fileId);
+        ),
+        Expanded(
+          child: ValueListenableBuilder<List<GifResult>>(
+            valueListenable: _results,
+            builder: (context, results, child) {
+              if (results.isNotEmpty) {
+                return _grid(
+                  count: results.length,
+                  builder: (index) => _GifTile(
+                    animation: results[index].animation,
+                    onTap: () => widget.onInlineGif(
+                      results[index].queryId,
+                      results[index].resultId,
+                    ),
+                  ),
+                );
+              }
+              return ValueListenableBuilder<List<Map<String, dynamic>>>(
+                valueListenable: _animations,
+                builder: (context, animations, child) {
+                  if (animations.isEmpty) {
+                    return ValueListenableBuilder<bool>(
+                      valueListenable: _isLoading,
+                      builder: (context, isLoading, child) => Center(
+                        child: isLoading
+                            ? const CircularProgressIndicator()
+                            : Text(
+                                context.l10n.noSavedGifs,
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                      ),
+                    );
+                  }
+                  return _grid(
+                    count: animations.length,
+                    builder: (index) => _GifTile(
+                      animation: animations[index],
+                      onTap: () {
+                        final fileId =
+                            animations[index]['animation']?['id'] as int?;
+                        if (fileId != null) widget.onGif(fileId);
+                      },
+                    ),
+                  );
+                },
+              );
             },
           ),
-        );
-      },
+        ),
+      ],
+    );
+  }
+
+  Widget _grid({
+    required int count,
+    required Widget Function(int index) builder,
+  }) {
+    return GridView.builder(
+      padding: const EdgeInsets.all(4),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 120,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
+      ),
+      itemCount: count,
+      itemBuilder: (context, index) => builder(index),
     );
   }
 }

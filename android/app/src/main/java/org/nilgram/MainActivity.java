@@ -1,4 +1,6 @@
-package org.nullgram;
+package org.nilgram;
+
+import android.content.Intent;
 
 import io.flutter.embedding.android.FlutterFragmentActivity;
 import io.flutter.embedding.engine.FlutterEngine;
@@ -13,6 +15,7 @@ import io.flutter.embedding.engine.FlutterEngine;
 public class MainActivity extends FlutterFragmentActivity {
     private TDLibBridge bridge;
     private PushChannel pushChannel;
+    private IntentChannel intentChannel;
 
     @Override
     public void configureFlutterEngine(FlutterEngine flutterEngine) {
@@ -26,6 +29,17 @@ public class MainActivity extends FlutterFragmentActivity {
 
         pushChannel = PushChannel.attachMain(
                 flutterEngine.getDartExecutor().getBinaryMessenger());
+
+        intentChannel = new IntentChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(), this);
+        intentChannel.handle(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intentChannel != null) intentChannel.handle(intent);
     }
 
     @Override
@@ -36,6 +50,8 @@ public class MainActivity extends FlutterFragmentActivity {
         bridge = null;
         PushChannel.detachMain(pushChannel);
         pushChannel = null;
+        if (intentChannel != null) intentChannel.dispose();
+        intentChannel = null;
         super.cleanUpFlutterEngine(flutterEngine);
     }
 }

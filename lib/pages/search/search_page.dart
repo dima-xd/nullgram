@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_item.dart';
@@ -112,7 +113,7 @@ class _SearchPageState extends State<SearchPage>
     if (chat.isEmpty) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+      chatRoute(chat),
     );
   }
 

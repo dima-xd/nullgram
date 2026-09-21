@@ -1,4 +1,4 @@
-package org.nullgram;
+package org.nilgram;
 
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;

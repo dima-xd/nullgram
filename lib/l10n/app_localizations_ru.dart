@@ -1196,5 +1196,135 @@ class AppLocalizationsRu extends AppLocalizations {
   String get notificationMarkRead => 'Прочитано';
 
   @override
+  String get privacy => 'Конфиденциальность';
+
+  @override
+  String get privacyLastSeen => 'Последняя активность';
+
+  @override
+  String get privacyProfilePhoto => 'Фото профиля';
+
+  @override
+  String get privacyFindByPhone => 'Кто найдёт меня по номеру';
+
+  @override
+  String get privacyForwardedMessages => 'Ссылка при пересылке';
+
+  @override
+  String get privacyPeerToPeerCalls => 'Прямые звонки (P2P)';
+
+  @override
+  String get privacyGroupInvites => 'Приглашения в группы';
+
+  @override
+  String get privacyVoiceMessages => 'Голосовые и видеосообщения';
+
+  @override
+  String get privacyEverybody => 'Все';
+
+  @override
+  String get privacyMyContacts => 'Мои контакты';
+
+  @override
+  String get privacyNobody => 'Никто';
+
+  @override
+  String get chats => 'Чаты';
+
+  @override
+  String get create => 'Создать';
+
+  @override
+  String get chatFolders => 'Папки с чатами';
+
+  @override
+  String get noFoldersYet => 'Папок пока нет';
+
+  @override
+  String get foldersExplanation =>
+      'Папка - это вкладка над списком чатов со своими правилами.';
+
+  @override
+  String get newFolder => 'Новая папка';
+
+  @override
+  String get editFolder => 'Изменить папку';
+
+  @override
+  String get folderName => 'Название папки';
+
+  @override
+  String get folderNameRequired => 'Укажите название папки.';
+
+  @override
+  String get folderNeedsChats => 'Добавьте хотя бы один чат или тип чатов.';
+
+  @override
+  String get deleteFolderExplanation =>
+      'Чаты останутся на месте, исчезнет только вкладка.';
+
+  @override
+  String get includedChats => 'Включённые чаты';
+
+  @override
+  String get excludedChats => 'Исключённые чаты';
+
+  @override
+  String get folderNonContacts => 'Не контакты';
+
+  @override
+  String get folderBots => 'Боты';
+
+  @override
+  String get folderMuted => 'Без звука';
+
+  @override
+  String get folderRead => 'Прочитанные';
+
+  @override
+  String get newTopic => 'Новая тема';
+
+  @override
+  String get topicName => 'Название темы';
+
+  @override
+  String get noTopicsYet => 'Тем пока нет';
+
+  @override
+  String get stickerPacks => 'Наборы стикеров';
+
+  @override
+  String get stickersInstalled => 'Установленные';
+
+  @override
+  String get stickersTrending => 'Популярные';
+
+  @override
+  String get searchStickerPacks => 'Поиск наборов';
+
+  @override
+  String get searchStickersHint => 'Поиск по эмодзи';
+
+  @override
+  String get searchGifsHint => 'Поиск GIF';
+
+  @override
+  String deleteFolderQuestion(String title) {
+    return 'Удалить \"$title\"?';
+  }
+
+  @override
+  String stickersCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count стикеров',
+      few: '$count стикера',
+      one: '1 стикер',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get notificationYou => 'Вы';
 }

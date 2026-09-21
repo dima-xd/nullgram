@@ -45,10 +45,15 @@ class ChatPage extends StatefulWidget {
   /// search or a notification.
   final int? initialMessageId;
 
+  /// Text put in the composer instead of the stored draft, used when another
+  /// app shares text into this one.
+  final String? initialText;
+
   const ChatPage({
     super.key,
     required this.chat,
     this.initialMessageId,
+    this.initialText,
   });
 
   @override
@@ -382,6 +387,11 @@ class _ChatPageState extends State<ChatPage> {
 
   /// Restores the chat's server-side draft into the composer.
   void _restoreDraft() {
+    final shared = widget.initialText;
+    if (shared != null && shared.isNotEmpty) {
+      _messageController.text = shared;
+      return;
+    }
     final draft = widget.chat['draftMessage'] as Map<String, dynamic>?;
     final text =
         draft?['inputMessageText']?['text']?['text'] as String? ?? '';
@@ -919,6 +929,17 @@ class _ChatPageState extends State<ChatPage> {
       replyToMessageId: replyToMessageId,
     );
     await TDLibClient.addRecentSticker(fileId: fileId);
+  }
+
+  Future<void> _onInlineGifPicked(int queryId, String resultId) async {
+    final replyToMessageId = _replyTo.value?['id'] as int?;
+    _replyTo.value = null;
+    await TDLibClient.sendInlineQueryResultMessage(
+      chatId: _chatId,
+      queryId: queryId,
+      resultId: resultId,
+      replyToMessageId: replyToMessageId,
+    );
   }
 
   Future<void> _onGifPicked(int fileId) async {
@@ -1676,8 +1697,10 @@ class _ChatPageState extends State<ChatPage> {
           onSend: _sendMessage,
           onSendOptions: _sendWithOptions,
           onVoice: _onVoiceRecorded,
+          chatId: _chatId,
           onSticker: _onStickerPicked,
           onGif: _onGifPicked,
+          onInlineGif: _onInlineGifPicked,
           onAttach: _showAttachMenu,
             onFormat: _wrapSelection,
             onInsertLink: _insertLink,

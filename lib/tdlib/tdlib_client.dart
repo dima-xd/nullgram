@@ -2890,4 +2890,218 @@ class TDLibClient {
         "name": name,
         "value": {"@type": "optionValueInteger", "value": value},
       }, accountId: accountId);
+
+  // ---------------------------------------------------------------------------
+  // Privacy
+  // ---------------------------------------------------------------------------
+
+  /// Reads the rules of one privacy setting, e.g. `userPrivacySettingShowStatus`.
+  static Future<List<Map<String, dynamic>>> getUserPrivacySettingRules({
+    required String setting,
+  }) async {
+    final data = await _request({
+      "@type": "getUserPrivacySettingRules",
+      "setting": {"@type": setting},
+    });
+    return _mapList(data, 'rules');
+  }
+
+  /// Replaces the rules of one privacy setting.
+  static Future<void> setUserPrivacySettingRules({
+    required String setting,
+    required List<Map<String, dynamic>> rules,
+  }) =>
+      _execute({
+        "@type": "setUserPrivacySettingRules",
+        "setting": {"@type": setting},
+        "rules": {"@type": "userPrivacySettingRules", "rules": rules},
+      });
+
+  // ---------------------------------------------------------------------------
+  // Chat folders
+  // ---------------------------------------------------------------------------
+
+  /// Reads a folder's full definition: its filters and chat lists.
+  ///
+  /// `updateChatFolders` only carries each folder's id, name and icon, so
+  /// editing one has to fetch the rest.
+  static Future<Map<String, dynamic>?> getChatFolder({
+    required int chatFolderId,
+  }) async {
+    final folder = await _request({
+      "@type": "getChatFolder",
+      "chatFolderId": chatFolderId,
+    });
+    if (folder == null) return null;
+    // Handed straight back to `editChatFolder`, which needs request casing.
+    return _toRequestJson(folder) as Map<String, dynamic>;
+  }
+
+  /// Creates a folder from a `chatFolder` map, returning its info.
+  static Future<Map<String, dynamic>?> createChatFolder({
+    required Map<String, dynamic> folder,
+  }) =>
+      _request({"@type": "createChatFolder", "folder": folder});
+
+  /// Replaces the definition of an existing folder.
+  static Future<Map<String, dynamic>?> editChatFolder({
+    required int chatFolderId,
+    required Map<String, dynamic> folder,
+  }) =>
+      _request({
+        "@type": "editChatFolder",
+        "chatFolderId": chatFolderId,
+        "folder": folder,
+      });
+
+  /// Deletes a folder. The chats in it are kept; only the tab goes away.
+  static Future<void> deleteChatFolder({required int chatFolderId}) => _execute({
+        "@type": "deleteChatFolder",
+        "chatFolderId": chatFolderId,
+        "leaveChatIds": const <int>[],
+      });
+
+  /// Reorders the folder tabs. "All chats" stays first.
+  static Future<void> reorderChatFolders({
+    required List<int> chatFolderIds,
+  }) =>
+      _execute({
+        "@type": "reorderChatFolders",
+        "chatFolderIds": chatFolderIds,
+        "mainChatListPosition": 0,
+      });
+
+  // ---------------------------------------------------------------------------
+  // Forum topics
+  // ---------------------------------------------------------------------------
+
+  /// A page of a forum supergroup's topics, ordered as Telegram lists them.
+  ///
+  /// The offsets come from the previous page's `nextOffset*` fields; passing
+  /// the defaults returns the first page.
+  static Future<Map<String, dynamic>?> getForumTopics({
+    required int chatId,
+    String query = '',
+    int offsetDate = 0,
+    int offsetMessageId = 0,
+    int offsetMessageThreadId = 0,
+    int limit = 40,
+  }) =>
+      _request({
+        "@type": "getForumTopics",
+        "chatId": chatId,
+        "query": query,
+        "offsetDate": offsetDate,
+        "offsetMessageId": offsetMessageId,
+        "offsetMessageThreadId": offsetMessageThreadId,
+        "limit": limit,
+      });
+
+  /// Creates a topic in a forum supergroup, returning its `forumTopicInfo`.
+  static Future<Map<String, dynamic>?> createForumTopic({
+    required int chatId,
+    required String name,
+  }) =>
+      _request({
+        "@type": "createForumTopic",
+        "chatId": chatId,
+        "name": name,
+        "icon": const {"@type": "forumTopicIcon", "color": 0x6FB9F0},
+      });
+
+  // ---------------------------------------------------------------------------
+  // Sticker packs and inline results
+  // ---------------------------------------------------------------------------
+
+  /// Searches stickers the user can send by [emoji], across installed and
+  /// suggested sets.
+  static Future<List<Map<String, dynamic>>> getStickersByEmoji({
+    required String emoji,
+    int limit = 40,
+  }) async {
+    final data = await _request({
+      "@type": "getStickers",
+      "stickerType": {"@type": "stickerTypeRegular"},
+      "query": emoji,
+      "limit": limit,
+      "chatId": 0,
+    });
+    return _mapList(data, 'stickers');
+  }
+
+  /// Searches public sticker sets by name.
+  static Future<List<Map<String, dynamic>>> searchStickerSets({
+    required String query,
+  }) async {
+    final data = await _request({
+      "@type": "searchStickerSets",
+      "stickerType": {"@type": "stickerTypeRegular"},
+      "query": query,
+    });
+    return _mapList(data, 'sets');
+  }
+
+  /// The sets Telegram is currently promoting, as `trendingStickerSets`.
+  static Future<List<Map<String, dynamic>>> getTrendingStickerSets({
+    int offset = 0,
+    int limit = 20,
+  }) async {
+    final data = await _request({
+      "@type": "getTrendingStickerSets",
+      "stickerType": {"@type": "stickerTypeRegular"},
+      "offset": offset,
+      "limit": limit,
+    });
+    return _mapList(data, 'sets');
+  }
+
+  /// Installs or removes a sticker set.
+  static Future<void> changeStickerSet({
+    required int setId,
+    required bool isInstalled,
+  }) =>
+      _execute({
+        "@type": "changeStickerSet",
+        "setId": setId,
+        "isInstalled": isInstalled,
+        "isArchived": false,
+      });
+
+  /// Asks an inline bot for results, used for GIF search through the bot
+  /// Telegram names in the `animation_search_bot_username` option.
+  static Future<Map<String, dynamic>?> getInlineQueryResults({
+    required int botUserId,
+    required int chatId,
+    required String query,
+    String offset = '',
+  }) =>
+      _request({
+        "@type": "getInlineQueryResults",
+        "botUserId": botUserId,
+        "chatId": chatId,
+        "query": query,
+        "offset": offset,
+      });
+
+  /// Sends one result of an inline query.
+  static Future<void> sendInlineQueryResultMessage({
+    required int chatId,
+    required int queryId,
+    required String resultId,
+    int messageThreadId = 0,
+    int? replyToMessageId,
+  }) =>
+      _execute({
+        "@type": "sendInlineQueryResultMessage",
+        "chatId": chatId,
+        if (messageThreadId != 0) "messageThreadId": messageThreadId,
+        if (replyToMessageId != null)
+          "replyTo": {
+            "@type": "inputMessageReplyToMessage",
+            "messageId": replyToMessageId,
+          },
+        "queryId": queryId,
+        "resultId": resultId,
+        "hideViaBot": false,
+      });
 }

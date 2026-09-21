@@ -19,6 +19,7 @@ class ThreadPage extends StatefulWidget {
     required this.threadInfo,
     this.history,
     this.canPostInitially = true,
+    this.title,
   });
 
   /// The chat the thread lives in.
@@ -32,6 +33,9 @@ class ThreadPage extends StatefulWidget {
 
   /// Whether the composer is offered before the first send is attempted.
   final bool canPostInitially;
+
+  /// Replaces the "Comments" heading, which a forum topic names itself.
+  final String? title;
 
   @override
   State<ThreadPage> createState() => _ThreadPageState();
@@ -158,7 +162,7 @@ class _ThreadPageState extends State<ThreadPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(context.l10n.comments),
+            Text(widget.title ?? context.l10n.comments),
             if (_replyCount > 0)
               Text(
                 context.l10n.commentsCount(_replyCount),
@@ -177,8 +181,12 @@ class _ThreadPageState extends State<ThreadPage> {
               chat: widget.chat,
               scrollController: _scrollController,
               lastReadOnOpen: _lastReadOnOpen,
-              emptyTitle: context.l10n.noCommentsYet,
-              emptySubtitle: context.l10n.noCommentsHint,
+              emptyTitle: widget.title == null
+                  ? context.l10n.noCommentsYet
+                  : context.l10n.noMessagesYet,
+              emptySubtitle: widget.title == null
+                  ? context.l10n.noCommentsHint
+                  : context.l10n.chatEmptyHint,
               leadingMessages: _rootMessages,
               leadingSeparatorLabel: context.l10n.comments,
               leadingEmptyLabel: context.l10n.noCommentsYet,

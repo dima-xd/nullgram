@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
@@ -224,7 +224,7 @@ class _GroupMembersPageState extends State<GroupMembersPage> {
         if (!mounted || chat == null) return;
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+          chatRoute(chat),
         );
       case 'promote':
         await TDLibClient.setChatMemberStatus(

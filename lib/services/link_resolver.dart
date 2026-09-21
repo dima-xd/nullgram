@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -76,12 +76,7 @@ Future<bool> _openPublicChat(BuildContext context, String username) async {
     return false;
   }
 
-  navigator.push(
-    MaterialPageRoute(
-      builder: (context) =>
-          ChatPage(chat: ChatStore.instance.chat(chat['id'] as int) ?? chat),
-    ),
-  );
+  navigator.push(chatRoute(chat));
   return true;
 }
 
@@ -105,7 +100,7 @@ Future<void> _joinByInviteLink(BuildContext context, String link) async {
         await TDLibClient.getChat(chatId: existingChatId);
     if (chat != null) {
       navigator.push(
-        MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+        chatRoute(chat),
       );
     }
     return;
@@ -138,7 +133,7 @@ Future<void> _joinByInviteLink(BuildContext context, String link) async {
     return;
   }
   navigator.push(
-    MaterialPageRoute(builder: (context) => ChatPage(chat: joined)),
+    chatRoute(joined),
   );
 }
 

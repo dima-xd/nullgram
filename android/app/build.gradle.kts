@@ -7,7 +7,7 @@ plugins {
 // A build without Firebase credentials must still work: the app then has no
 // FCM token and registers no device.
 
-// The debug variant is org.nullgram.debug, so the Firebase project must
+// The debug variant is org.nilgram.debug, so the Firebase project must
 // register that package name too or processDebugGoogleServices fails.
 val hasFirebase = file("google-services.json").exists()
 if (hasFirebase) {
@@ -21,7 +21,7 @@ android {
         }
     }
 
-    namespace = "org.nullgram"
+    namespace = "org.nilgram"
     compileSdk = 36
     ndkVersion = "27.0.12077973"
 
@@ -37,7 +37,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "org.nullgram"
+        applicationId = "org.nilgram"
         minSdk = maxOf(23, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

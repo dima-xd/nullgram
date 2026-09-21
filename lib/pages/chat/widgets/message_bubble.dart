@@ -10,6 +10,7 @@ import 'message_location.dart';
 import 'message_photo.dart';
 import 'message_poll.dart';
 import 'message_keyboard.dart';
+import 'message_link_preview.dart';
 import 'message_reply.dart';
 import 'message_service.dart';
 import 'message_reactions.dart';
@@ -182,6 +183,11 @@ class MessageBubble extends StatelessWidget {
     final chatColors = context.chatColors;
     final bubbleColor =
         isOutgoing ? chatColors.outgoingBubble : chatColors.incomingBubble;
+
+    // Only a text message carries one; TDLib puts media previews in the
+    // content itself.
+    final linkPreview = content['linkPreview'] as Map<String, dynamic>?;
+    final showPreviewAbove = linkPreview?['showAboveText'] == true;
 
     final replyTo = message['replyTo'] as Map<String, dynamic>?;
     final isReply = replyTo?['@type'] == 'MessageReplyToMessage';
@@ -389,11 +395,17 @@ class MessageBubble extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               ...prefix,
-              if (contentType == 'MessageText')
+              if (contentType == 'MessageText') ...[
+                if (linkPreview != null && showPreviewAbove)
+                  MessageLinkPreview(linkPreview: linkPreview),
                 MessageText(
                   content: content['text'],
-                  trailing: isLastInGroup ? metaSpan : null,
+                  trailing:
+                      isLastInGroup && linkPreview == null ? metaSpan : null,
                 ),
+                if (linkPreview != null && !showPreviewAbove)
+                  MessageLinkPreview(linkPreview: linkPreview),
+              ],
               if (contentType == 'MessageLocation' ||
                   contentType == 'MessageVenue')
                 MessageLocation(content: content),
@@ -431,7 +443,8 @@ class MessageBubble extends StatelessWidget {
                 ),
               // Text already carries the meta inline; everything else still
               // needs its own row for it.
-              if (isLastInGroup && contentType != 'MessageText') ...[
+              if (isLastInGroup &&
+                  (contentType != 'MessageText' || linkPreview != null)) ...[
                 const SizedBox(height: 4),
                 Align(alignment: Alignment.centerRight, child: meta),
               ],

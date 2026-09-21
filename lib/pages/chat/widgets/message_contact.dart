@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../chat_page.dart';
+import '../chat_route.dart';
 
 /// Renders a `MessageContact` as a tappable card with initials, name and phone.
 ///
@@ -95,7 +95,7 @@ class MessageContact extends StatelessWidget {
       if (!context.mounted || chat == null) return;
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+        chatRoute(chat),
       );
       return;
     }

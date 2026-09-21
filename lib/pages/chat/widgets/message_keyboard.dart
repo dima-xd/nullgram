@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/services/link_resolver.dart';
 import 'package:nullgram/tdlib/td_bytes.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
@@ -154,7 +154,7 @@ class _KeyboardButton extends StatelessWidget {
         if (chat == null || !context.mounted) return;
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+          chatRoute(chat),
         );
 
       case 'InlineKeyboardButtonTypeCallback':

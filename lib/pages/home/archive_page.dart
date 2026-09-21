@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/pages/home/widgets/chat_list_view.dart';
 import 'package:nullgram/services/chat_store.dart';
 import 'package:nullgram/l10n/l10n.dart';
@@ -22,7 +22,7 @@ class ArchivePage extends StatelessWidget {
           if (chat == null) return;
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+            chatRoute(chat),
           );
         },
       ),

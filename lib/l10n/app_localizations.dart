@@ -2288,6 +2288,240 @@ abstract class AppLocalizations {
   /// **'Mark as read'**
   String get notificationMarkRead;
 
+  /// No description provided for @privacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy'**
+  String get privacy;
+
+  /// No description provided for @privacyLastSeen.
+  ///
+  /// In en, this message translates to:
+  /// **'Last seen and online'**
+  String get privacyLastSeen;
+
+  /// No description provided for @privacyProfilePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile photo'**
+  String get privacyProfilePhoto;
+
+  /// No description provided for @privacyFindByPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Who can find me by my number'**
+  String get privacyFindByPhone;
+
+  /// No description provided for @privacyForwardedMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'Link in forwarded messages'**
+  String get privacyForwardedMessages;
+
+  /// No description provided for @privacyPeerToPeerCalls.
+  ///
+  /// In en, this message translates to:
+  /// **'Peer-to-peer calls'**
+  String get privacyPeerToPeerCalls;
+
+  /// No description provided for @privacyGroupInvites.
+  ///
+  /// In en, this message translates to:
+  /// **'Group invites'**
+  String get privacyGroupInvites;
+
+  /// No description provided for @privacyVoiceMessages.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice and video messages'**
+  String get privacyVoiceMessages;
+
+  /// No description provided for @privacyEverybody.
+  ///
+  /// In en, this message translates to:
+  /// **'Everybody'**
+  String get privacyEverybody;
+
+  /// No description provided for @privacyMyContacts.
+  ///
+  /// In en, this message translates to:
+  /// **'My contacts'**
+  String get privacyMyContacts;
+
+  /// No description provided for @privacyNobody.
+  ///
+  /// In en, this message translates to:
+  /// **'Nobody'**
+  String get privacyNobody;
+
+  /// No description provided for @chats.
+  ///
+  /// In en, this message translates to:
+  /// **'Chats'**
+  String get chats;
+
+  /// No description provided for @create.
+  ///
+  /// In en, this message translates to:
+  /// **'Create'**
+  String get create;
+
+  /// No description provided for @chatFolders.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat folders'**
+  String get chatFolders;
+
+  /// No description provided for @noFoldersYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No folders yet'**
+  String get noFoldersYet;
+
+  /// No description provided for @foldersExplanation.
+  ///
+  /// In en, this message translates to:
+  /// **'A folder is a tab over your chat list with its own rules.'**
+  String get foldersExplanation;
+
+  /// No description provided for @newFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'New folder'**
+  String get newFolder;
+
+  /// No description provided for @editFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit folder'**
+  String get editFolder;
+
+  /// No description provided for @folderName.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder name'**
+  String get folderName;
+
+  /// No description provided for @folderNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Give the folder a name.'**
+  String get folderNameRequired;
+
+  /// No description provided for @folderNeedsChats.
+  ///
+  /// In en, this message translates to:
+  /// **'Add at least one chat or chat type.'**
+  String get folderNeedsChats;
+
+  /// No description provided for @deleteFolderExplanation.
+  ///
+  /// In en, this message translates to:
+  /// **'The chats stay where they are; only the tab goes away.'**
+  String get deleteFolderExplanation;
+
+  /// No description provided for @includedChats.
+  ///
+  /// In en, this message translates to:
+  /// **'Included chats'**
+  String get includedChats;
+
+  /// No description provided for @excludedChats.
+  ///
+  /// In en, this message translates to:
+  /// **'Excluded chats'**
+  String get excludedChats;
+
+  /// No description provided for @folderNonContacts.
+  ///
+  /// In en, this message translates to:
+  /// **'Non-contacts'**
+  String get folderNonContacts;
+
+  /// No description provided for @folderBots.
+  ///
+  /// In en, this message translates to:
+  /// **'Bots'**
+  String get folderBots;
+
+  /// No description provided for @folderMuted.
+  ///
+  /// In en, this message translates to:
+  /// **'Muted'**
+  String get folderMuted;
+
+  /// No description provided for @folderRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Read'**
+  String get folderRead;
+
+  /// No description provided for @newTopic.
+  ///
+  /// In en, this message translates to:
+  /// **'New topic'**
+  String get newTopic;
+
+  /// No description provided for @topicName.
+  ///
+  /// In en, this message translates to:
+  /// **'Topic name'**
+  String get topicName;
+
+  /// No description provided for @noTopicsYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No topics yet'**
+  String get noTopicsYet;
+
+  /// No description provided for @stickerPacks.
+  ///
+  /// In en, this message translates to:
+  /// **'Sticker packs'**
+  String get stickerPacks;
+
+  /// No description provided for @stickersInstalled.
+  ///
+  /// In en, this message translates to:
+  /// **'Installed'**
+  String get stickersInstalled;
+
+  /// No description provided for @stickersTrending.
+  ///
+  /// In en, this message translates to:
+  /// **'Trending'**
+  String get stickersTrending;
+
+  /// No description provided for @searchStickerPacks.
+  ///
+  /// In en, this message translates to:
+  /// **'Search sticker packs'**
+  String get searchStickerPacks;
+
+  /// No description provided for @searchStickersHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search by emoji'**
+  String get searchStickersHint;
+
+  /// No description provided for @searchGifsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search GIFs'**
+  String get searchGifsHint;
+
+  /// No description provided for @deleteFolderQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete \"{title}\"?'**
+  String deleteFolderQuestion(String title);
+
+  /// No description provided for @stickersCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 sticker} other{{count} stickers}}'**
+  String stickersCount(int count);
+
   /// No description provided for @notificationYou.
   ///
   /// In en, this message translates to:

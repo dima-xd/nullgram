@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/pages/contacts/contacts_page.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
 import 'package:nullgram/widgets/safe_insets.dart';
@@ -111,7 +111,7 @@ class _CreateChatPageState extends State<CreateChatPage> {
     // list rather than on a stale creation form.
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+      chatRoute(chat),
     );
   }
 

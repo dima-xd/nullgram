@@ -59,6 +59,41 @@ jobs:
           API_HASH: ${{ secrets.API_HASH }}
           DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
 
+      # Optional, unlike the credentials above: without Firebase the app still
+      # builds and simply has no push token.
+      - name: Decode google-services.json
+        run: |
+          target=android/app/google-services.json
+          if [ -z "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "::notice::No GOOGLE_SERVICES_JSON_BASE64 secret set; building without push notifications"
+            exit 0
+          fi
+          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > "$target"
+          python3 - "$target" <<'CHECK'
+          import json, sys
+
+          path = sys.argv[1]
+          try:
+              config = json.load(open(path))
+          except ValueError as error:
+              sys.exit('::error::GOOGLE_SERVICES_JSON_BASE64 did not decode to '
+                       'valid JSON: %s' % error)
+
+          # A wrong package name only surfaces as a cryptic Gradle failure later.
+          packages = [
+              client.get('client_info', {})
+                    .get('android_client_info', {})
+                    .get('package_name')
+              for client in config.get('client', [])
+          ]
+          if 'org.nilgram' not in packages:
+              sys.exit('::error::google-services.json has no client for '
+                       'org.nilgram, only: %s'
+                       % ', '.join(p for p in packages if p))
+          CHECK
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+
       - name: Build signed APK
         run: |
           flutter build apk --release --split-per-abi \

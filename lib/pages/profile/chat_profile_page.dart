@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/profile/edit_chat_page.dart';
 import 'package:nullgram/pages/profile/group_members_page.dart';
@@ -303,7 +303,7 @@ class _QuickActions extends StatelessWidget {
     }
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+      chatRoute(chat),
     );
   }
 

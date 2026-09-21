@@ -1190,5 +1190,134 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notificationMarkRead => 'Mark as read';
 
   @override
+  String get privacy => 'Privacy';
+
+  @override
+  String get privacyLastSeen => 'Last seen and online';
+
+  @override
+  String get privacyProfilePhoto => 'Profile photo';
+
+  @override
+  String get privacyFindByPhone => 'Who can find me by my number';
+
+  @override
+  String get privacyForwardedMessages => 'Link in forwarded messages';
+
+  @override
+  String get privacyPeerToPeerCalls => 'Peer-to-peer calls';
+
+  @override
+  String get privacyGroupInvites => 'Group invites';
+
+  @override
+  String get privacyVoiceMessages => 'Voice and video messages';
+
+  @override
+  String get privacyEverybody => 'Everybody';
+
+  @override
+  String get privacyMyContacts => 'My contacts';
+
+  @override
+  String get privacyNobody => 'Nobody';
+
+  @override
+  String get chats => 'Chats';
+
+  @override
+  String get create => 'Create';
+
+  @override
+  String get chatFolders => 'Chat folders';
+
+  @override
+  String get noFoldersYet => 'No folders yet';
+
+  @override
+  String get foldersExplanation =>
+      'A folder is a tab over your chat list with its own rules.';
+
+  @override
+  String get newFolder => 'New folder';
+
+  @override
+  String get editFolder => 'Edit folder';
+
+  @override
+  String get folderName => 'Folder name';
+
+  @override
+  String get folderNameRequired => 'Give the folder a name.';
+
+  @override
+  String get folderNeedsChats => 'Add at least one chat or chat type.';
+
+  @override
+  String get deleteFolderExplanation =>
+      'The chats stay where they are; only the tab goes away.';
+
+  @override
+  String get includedChats => 'Included chats';
+
+  @override
+  String get excludedChats => 'Excluded chats';
+
+  @override
+  String get folderNonContacts => 'Non-contacts';
+
+  @override
+  String get folderBots => 'Bots';
+
+  @override
+  String get folderMuted => 'Muted';
+
+  @override
+  String get folderRead => 'Read';
+
+  @override
+  String get newTopic => 'New topic';
+
+  @override
+  String get topicName => 'Topic name';
+
+  @override
+  String get noTopicsYet => 'No topics yet';
+
+  @override
+  String get stickerPacks => 'Sticker packs';
+
+  @override
+  String get stickersInstalled => 'Installed';
+
+  @override
+  String get stickersTrending => 'Trending';
+
+  @override
+  String get searchStickerPacks => 'Search sticker packs';
+
+  @override
+  String get searchStickersHint => 'Search by emoji';
+
+  @override
+  String get searchGifsHint => 'Search GIFs';
+
+  @override
+  String deleteFolderQuestion(String title) {
+    return 'Delete \"$title\"?';
+  }
+
+  @override
+  String stickersCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count stickers',
+      one: '1 sticker',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get notificationYou => 'You';
 }

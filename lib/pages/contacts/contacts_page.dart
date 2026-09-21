@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:nullgram/pages/chat/chat_page.dart';
+import 'package:nullgram/pages/chat/chat_route.dart';
 import 'package:nullgram/pages/chat/utils/message_formatter.dart';
 import 'package:nullgram/pages/chat/widgets/chat_avatar.dart';
 import 'package:nullgram/tdlib/tdlib_client.dart';
@@ -82,7 +82,7 @@ class _ContactsPageState extends State<ContactsPage> {
     if (!mounted || chat == null) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => ChatPage(chat: chat)),
+      chatRoute(chat),
     );
   }
 
