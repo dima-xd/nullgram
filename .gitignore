@@ -48,3 +48,6 @@ app.*.map.json
 android/app/google-services.json
 /docs/
 assets/config/env
+
+# Local dependency overrides, e.g. a plugin checked out next door.
+pubspec_overrides.yaml
